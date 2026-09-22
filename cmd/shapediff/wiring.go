@@ -128,12 +128,12 @@ func deps(env pipeline.Env, cfg *config.Config, log io.Writer) (pipeline.Deps, e
 // ---- weekly ----
 
 type weeklyRepo struct {
-	Slug       string `yaml:"slug"`
-	Dir        string `yaml:"dir"`
-	Branch     string `yaml:"branch"`
-	ProjectRaw string `yaml:"project"`
-	ProjectURL string `yaml:"url"`
-	Project    gitlab.Project
+	Slug       string         `yaml:"slug"`
+	Dir        string         `yaml:"dir"`
+	Branch     string         `yaml:"branch"`
+	ProjectRaw string         `yaml:"project"`
+	ProjectURL string         `yaml:"url"`
+	Project    gitlab.Project `yaml:"-"`
 }
 
 type weeklyDepsT struct {

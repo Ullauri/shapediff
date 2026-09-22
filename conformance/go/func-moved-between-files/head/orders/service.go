@@ -26,4 +26,3 @@ func (s *Service) Create(ctx context.Context, name string) error {
 	}
 	return s.store.Insert(ctx, name)
 }
-

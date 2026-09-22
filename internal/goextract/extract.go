@@ -578,13 +578,22 @@ func (x *extractor) ssaPass() {
 	}
 	var locals []lf
 	for fn := range funcs {
-		if fn.Parent() != nil || fn.Synthetic != "" || fn.Pkg == nil || fn.Object() == nil {
+		if fn.Parent() != nil {
 			continue
 		}
-		if !x.isLocal(fn.Pkg.Pkg.Path()) {
+		// generic instantiations are walked too (their bodies are where
+		// VTA sees the concrete flows) and attributed to the origin
+		decl := fn
+		if o := fn.Origin(); o != nil {
+			decl = o
+		}
+		if decl.Synthetic != "" || decl.Pkg == nil || decl.Object() == nil {
 			continue
 		}
-		obj, ok := fn.Object().(*types.Func)
+		if !x.isLocal(decl.Pkg.Pkg.Path()) {
+			continue
+		}
+		obj, ok := decl.Object().(*types.Func)
 		if !ok {
 			continue
 		}
@@ -865,10 +874,13 @@ func (x *extractor) grpcRegistration(callee *types.Func, service string, impl ss
 		if strings.HasPrefix(m.Name(), "mustEmbed") {
 			continue
 		}
-		obj, _, _ := types.LookupFieldOrMethod(implType, true, m.Pkg(), m.Name())
+		obj, index, _ := types.LookupFieldOrMethod(implType, true, m.Pkg(), m.Name())
 		fn, ok := obj.(*types.Func)
 		if !ok || fn.Pkg() == nil || !x.isLocal(fn.Pkg().Path()) {
 			continue
+		}
+		if len(index) > 1 {
+			continue // promoted from an embedded Unimplemented*Server: not implemented here
 		}
 		x.addEntry("grpc", svc+"/"+m.Name(), x.idForFuncObj(fn), pkg)
 	}

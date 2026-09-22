@@ -1,0 +1,25 @@
+# .shapediff.yml: repo configuration (spec section 13). Every field is
+# optional; this file shows the defaults and the shape of the pattern lists.
+modules: ["."]                  # module roots for monorepos; one graph per module, merged
+build_tags: []
+ignore: ["**/mocks/**", "**/testdata/**"]
+entrypoints:
+  worker:
+    - call: "github.com/acme/jobs.Register"   # any (name literal, handler) registration
+  cron:
+    - call: "github.com/acme/sched.Every"
+sinks:
+  http_client:
+    - package: "github.com/acme/svc/internal/paymentsclient"
+  db:
+    - package: "github.com/acme/svc/internal/db"
+budget:
+  chars: 1800                   # S; set from the instance's Mermaid limit measured in the spike
+  nodes: 24                     # B
+  edges: 36                     # E, default 1.5 x B
+narrow_targets: 2               # k, section 7.4
+narration: template             # template | llm | off
+llm:                            # only read when narration is llm
+  endpoint: ""                  # any OpenAI-compatible chat completions URL
+  model: ""
+  api_key_env: SHAPEDIFF_LLM_KEY

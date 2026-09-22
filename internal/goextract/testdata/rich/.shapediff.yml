@@ -1,0 +1,3 @@
+entrypoints:
+  worker:
+    - call: "example.com/rich/jobs.Register"

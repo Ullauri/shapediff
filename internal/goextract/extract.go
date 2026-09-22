@@ -508,14 +508,17 @@ func (x *extractor) cobraEntries(p *packages.Package, f *ast.File) {
 				}
 			}
 			if use != "" && handler != "" {
-				x.addEntry("cli", use, handler)
+				x.addEntry("cli", use, handler, p.PkgPath)
 			}
 		}
 		return true
 	})
 }
 
-func (x *extractor) addEntry(kind, name, handlerID string) {
+// addEntry records an entry point. pkg is the package of the registration
+// site: it is not part of the ID, but it is where the entry point is wired
+// in, and it is what the delta engine's load-status suppression reads.
+func (x *extractor) addEntry(kind, name, handlerID, pkg string) {
 	if _, ok := x.nodes[handlerID]; !ok {
 		return
 	}
@@ -527,7 +530,7 @@ func (x *extractor) addEntry(kind, name, handlerID string) {
 		}
 		return
 	}
-	x.addNode(graph.Node{ID: id, Kind: graph.KindEntrypoint, Name: name, Attrs: graph.NodeAttrs{EntryKind: kind}})
+	x.addNode(graph.Node{ID: id, Kind: graph.KindEntrypoint, Name: name, Package: pkg, Attrs: graph.NodeAttrs{EntryKind: kind}})
 	x.addEdge(graph.Edge{From: id, To: handlerID, Kind: graph.EdgeHandles, Confidence: graph.ConfResolved}, "", 0)
 }
 
@@ -767,6 +770,10 @@ var registerRe = regexp.MustCompile(`^Register(\w+)Server$`)
 // registration checks a call against the entry-point tables.
 func (x *extractor) registration(callerID string, common *ssa.CallCommon, callee *types.Func) {
 	key := calleeKey(callee)
+	pkg := ""
+	if n := x.nodes[callerID]; n != nil {
+		pkg = n.Package
+	}
 	args := common.Args
 	sig, _ := callee.Type().(*types.Signature)
 	if !common.IsInvoke() && sig != nil && sig.Recv() != nil && len(args) > 0 {
@@ -795,7 +802,7 @@ func (x *extractor) registration(callerID string, common *ssa.CallCommon, callee
 		if route == "<dynamic>" {
 			name += " " + graph.ShortName(handler)
 		}
-		x.addEntry("http", name, handler)
+		x.addEntry("http", name, handler, pkg)
 		return
 	}
 	if wp, ok := x.workerPats[key]; ok {
@@ -810,7 +817,7 @@ func (x *extractor) registration(callerID string, common *ssa.CallCommon, callee
 		if name == "" {
 			name = "<dynamic> " + graph.ShortName(handler)
 		}
-		x.addEntry("worker", name, handler)
+		x.addEntry("worker", name, handler, pkg)
 		return
 	}
 	if cp, ok := x.cronPats[key]; ok {
@@ -821,11 +828,11 @@ func (x *extractor) registration(callerID string, common *ssa.CallCommon, callee
 		if handler == "" {
 			return
 		}
-		x.addEntry("cron", graph.ShortName(handler), handler)
+		x.addEntry("cron", graph.ShortName(handler), handler, pkg)
 		return
 	}
 	if m := registerRe.FindStringSubmatch(callee.Name()); m != nil && sig != nil && sig.Recv() == nil && len(args) == 2 && callee.Pkg() != nil {
-		x.grpcRegistration(callee, m[1], args[1])
+		x.grpcRegistration(callee, m[1], args[1], pkg)
 	}
 }
 
@@ -838,7 +845,7 @@ func hasVerbPrefix(route string) bool {
 	return v == strings.ToUpper(v) && v != "<DYNAMIC>"
 }
 
-func (x *extractor) grpcRegistration(callee *types.Func, service string, impl ssa.Value) {
+func (x *extractor) grpcRegistration(callee *types.Func, service string, impl ssa.Value, pkg string) {
 	ifaceObj := callee.Pkg().Scope().Lookup(service + "Server")
 	tn, ok := ifaceObj.(*types.TypeName)
 	if !ok {
@@ -863,7 +870,7 @@ func (x *extractor) grpcRegistration(callee *types.Func, service string, impl ss
 		if !ok || fn.Pkg() == nil || !x.isLocal(fn.Pkg().Path()) {
 			continue
 		}
-		x.addEntry("grpc", svc+"/"+m.Name(), x.idForFuncObj(fn))
+		x.addEntry("grpc", svc+"/"+m.Name(), x.idForFuncObj(fn), pkg)
 	}
 }
 
@@ -1126,22 +1133,82 @@ func (x *extractor) mainFallback() {
 		if len(mains) > 1 {
 			name = graph.ShortName(graph.PkgID(path))
 		}
-		x.addEntry("cli", name, graph.SymID(path, "main"))
+		x.addEntry("cli", name, graph.SymID(path, "main"), path)
 	}
 }
 
 // ---- assemble ----
 
 func (x *extractor) toolchain(ctx context.Context) string {
-	cmd := exec.CommandContext(ctx, "go", "env", "GOVERSION")
-	cmd.Dir = x.moduleDir()
-	cmd.Env = x.env()
-	out, err := cmd.Output()
+	tc, err := Toolchain(ctx, x.moduleDir(), x.opts.Env)
 	if err != nil {
 		x.warn("go env GOVERSION: %v", err)
 		return "unknown"
 	}
-	return strings.TrimSpace(string(out))
+	return tc
+}
+
+// Toolchain reports the Go toolchain the go command in dir resolves to,
+// which is what packages.Load will use. It is part of the cache key, so
+// the pipeline asks before extracting.
+func Toolchain(ctx context.Context, dir string, extraEnv []string) (string, error) {
+	cmd := exec.CommandContext(ctx, "go", "env", "GOVERSION")
+	cmd.Dir = dir
+	cmd.Env = append(append(os.Environ(), "GOFLAGS=-mod=mod"), extraEnv...)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// ExtractAll extracts every module root listed in the config and merges
+// the documents into one (spec 7.5: one graph per module, joined here so
+// the delta engine sees the repo whole; import paths keep IDs disjoint).
+func ExtractAll(ctx context.Context, opts Options) (*graph.Document, error) {
+	if opts.Config == nil {
+		opts.Config = config.Default()
+	}
+	mods := opts.Config.Modules
+	if len(mods) == 0 {
+		mods = []string{"."}
+	}
+	var merged *graph.Document
+	for _, m := range mods {
+		o := opts
+		o.ModuleDir = m
+		doc, err := Extract(ctx, o)
+		if err != nil {
+			if len(mods) == 1 {
+				return nil, err
+			}
+			if merged == nil {
+				merged = emptyDocument(ctx, o)
+			}
+			merged.Warnings = append(merged.Warnings, fmt.Sprintf("module %s: %v", m, err))
+			continue
+		}
+		if merged == nil {
+			merged = doc
+			continue
+		}
+		merged.Packages = append(merged.Packages, doc.Packages...)
+		merged.Nodes = append(merged.Nodes, doc.Nodes...)
+		merged.Edges = append(merged.Edges, doc.Edges...)
+		merged.Warnings = append(merged.Warnings, doc.Warnings...)
+	}
+	merged.Canonicalize()
+	return merged, nil
+}
+
+func emptyDocument(ctx context.Context, opts Options) *graph.Document {
+	mode := BuilderMode
+	tc, _ := Toolchain(ctx, filepath.Join(opts.RepoDir, opts.ModuleDir), opts.Env)
+	if tc == "" {
+		tc = "unknown"
+	}
+	return &graph.Document{SchemaVersion: graph.SchemaVersion, Repo: opts.Repo, SHA: opts.SHA,
+		Extractor: graph.Extractor{Name: Name, Version: opts.Version, Precision: Precision, Toolchain: tc, ConfigHash: opts.Config.Hash(), BuilderMode: &mode}}
 }
 
 func (x *extractor) document(ctx context.Context) (*graph.Document, error) {

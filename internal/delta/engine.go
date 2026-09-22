@@ -98,7 +98,27 @@ func (e *engine) suppression() {
 func (e *engine) isSuppressed(ix *graph.Index, id string) bool {
 	p := ix.PackageOf(id)
 	if p == "" {
-		return false
+		// a sink (or any package-less node) is suppressed when every edge
+		// touching it comes from a suppressed package: nothing else can
+		// say whether it went away
+		n := ix.Nodes[id]
+		if n == nil {
+			return false
+		}
+		adj := append(append([]*graph.Edge{}, ix.In[id]...), ix.Out[id]...)
+		if len(adj) == 0 {
+			return false
+		}
+		for _, ed := range adj {
+			other := ed.From
+			if other == id {
+				other = ed.To
+			}
+			if op := ix.PackageOf(other); op == "" || !e.suppressed[op] {
+				return false
+			}
+		}
+		return true
 	}
 	return e.suppressed[p]
 }
@@ -610,7 +630,9 @@ func (e *engine) nodes() {
 			matched[id] = id
 		} else {
 			if e.isSuppressed(e.base, id) {
-				e.hidden[e.base.PackageOf(id)].HiddenRemovals++
+				if h := e.hiddenFor(e.base, id); h != nil {
+					h.HiddenRemovals++
+				}
 				continue
 			}
 			d.Nodes.Removed = append(d.Nodes.Removed, id)
@@ -621,7 +643,9 @@ func (e *engine) nodes() {
 			continue
 		}
 		if e.isSuppressed(e.head, id) {
-			e.hidden[e.head.PackageOf(id)].HiddenAdditions++
+			if h := e.hiddenFor(e.head, id); h != nil {
+				h.HiddenAdditions++
+			}
 			continue
 		}
 		d.Nodes.Added = append(d.Nodes.Added, id)
@@ -654,6 +678,26 @@ func (e *engine) nodes() {
 			d.Nodes.BodyChanged = append(d.Nodes.BodyChanged, hn.ID)
 		}
 	}
+}
+
+// hiddenFor returns the suppression record a node's changes are counted
+// under: its package's, or for a package-less node the first suppressed
+// package adjacent to it.
+func (e *engine) hiddenFor(ix *graph.Index, id string) *Suppressed {
+	if p := ix.PackageOf(id); p != "" {
+		return e.hidden[p]
+	}
+	adj := append(append([]*graph.Edge{}, ix.In[id]...), ix.Out[id]...)
+	for _, ed := range adj {
+		other := ed.From
+		if other == id {
+			other = ed.To
+		}
+		if h := e.hidden[ix.PackageOf(other)]; h != nil {
+			return h
+		}
+	}
+	return nil
 }
 
 // ---- edges ----
@@ -748,6 +792,16 @@ func (e *engine) okInBoth(ix *graph.Index, id string) bool {
 }
 
 func (e *engine) walk(ix *graph.Index, handler string) reach {
+	return Reach(ix, handler, func(id string) bool { return e.okInBoth(ix, id) })
+}
+
+// Reach computes, from one symbol, the width (widest dynamic edge on the
+// narrowest path, spec 7.4) of every reached package and sink. ok says
+// which nodes may be traversed; nil means all.
+func Reach(ix *graph.Index, handler string, ok func(id string) bool) map[string]int {
+	if ok == nil {
+		ok = func(string) bool { return true }
+	}
 	width := map[string]int{handler: 0}
 	// minimax Dijkstra; the graph is small enough for a simple loop
 	done := map[string]bool{}
@@ -769,7 +823,7 @@ func (e *engine) walk(ix *graph.Index, handler string) reach {
 			if ed.Kind != graph.EdgeCalls {
 				continue
 			}
-			if !e.okInBoth(ix, ed.To) {
+			if !ok(ed.To) {
 				continue
 			}
 			w := 1

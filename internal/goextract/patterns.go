@@ -141,6 +141,18 @@ var queueProducerMethods = map[string]bool{
 	"PublishWithContext": true, "PublishWithDeferredConfirm": true,
 }
 
+// setupCall reports whether a db/cache/queue method is connection or
+// transaction plumbing rather than data access, and so not a sink.
+func setupCall(method string) bool {
+	switch method {
+	case "Open", "OpenDB", "Connect", "ConnectConfig", "New", "NewClient", "NewPool", "NewWithConfig", "NewWriter", "NewReader", "NewProducer", "NewConsumer", "NewSyncProducer", "NewAsyncProducer",
+		"Close", "Ping", "PingContext", "Begin", "BeginTx", "Commit", "Rollback", "Prepare", "PrepareContext",
+		"SetMaxOpenConns", "SetMaxIdleConns", "SetConnMaxLifetime", "SetConnMaxIdleTime", "Stats", "Driver", "Conn", "WithContext", "Session", "Dial", "DialContext", "Options", "Channel", "Err":
+		return true
+	}
+	return false
+}
+
 // readVerb reports whether a db/cache method name reads rather than writes.
 func readVerb(method string) bool {
 	for _, p := range []string{"Query", "Get", "Select", "Find", "First", "Scan", "Count", "Exists", "List", "Row", "Rows", "Take", "Last", "Pluck", "HGet", "MGet", "Keys", "Exists", "TTL", "Load"} {

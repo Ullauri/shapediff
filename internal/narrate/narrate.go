@@ -275,11 +275,9 @@ func bodyOnly(d *delta.Delta) Sentence {
 	if n == 0 {
 		return Sentence{}
 	}
-	s := Sentence{Text: fmt.Sprintf("%d %s changed body only.", n, plural(n, "symbol", "symbols"))}
-	for _, id := range d.Nodes.BodyChanged {
-		s.Claims = append(s.Claims, Claim{SubjectID: id, Predicate: PredBodyChanged, Sentence: s.Text})
-	}
-	return s
+	// A count is not a triple; the sentence carries no claims. A rewrite
+	// that names nodes is validated claim by claim like any other.
+	return Sentence{Text: fmt.Sprintf("%d %s changed body only.", n, plural(n, "symbol", "symbols"))}
 }
 
 func suppressed(d *delta.Delta) Sentence {

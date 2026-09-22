@@ -296,3 +296,16 @@ func (d *Delta) Touched(head, base *graph.Index) map[string]bool {
 	}
 	return t
 }
+
+// Read decodes a delta document from a reader.
+func Read(r io.Reader) (*Delta, error) {
+	var d Delta
+	if err := json.NewDecoder(r).Decode(&d); err != nil {
+		return nil, fmt.Errorf("decode delta: %w", err)
+	}
+	if d.SchemaVersion != SchemaVersion {
+		return nil, fmt.Errorf("delta schema_version %d, want %d", d.SchemaVersion, SchemaVersion)
+	}
+	d.Canonicalize()
+	return &d, nil
+}

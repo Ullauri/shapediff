@@ -1004,6 +1004,9 @@ func (x *extractor) sinkCall(callerID string, callee *types.Func) {
 		name = graph.ShortName(graph.PkgID(best))
 	}
 	configured := pat.name == ""
+	if !configured && setupCall(callee.Name()) {
+		return
+	}
 	switch pat.kind {
 	case "db":
 		if info, ok := x.sqlc[callerID]; ok {

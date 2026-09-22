@@ -9,7 +9,7 @@ v0.3, which sits beside this directory.
 ## Build and test
 
 ```
-make build      # bin/shapediff (needs Go 1.26; go.mod's toolchain line fetches it)
+make build      # bin/shapediff (needs Go 1.26; the go 1.26.0 line in go.mod makes `go` fetch it under GOTOOLCHAIN=auto)
 make test       # unit tests plus the conformance suite over conformance/go
 make conform    # the suite alone, through the built binary
 make check      # fmt, vet, test, conform
@@ -96,6 +96,18 @@ project. Both files document their variables.
   invisible as callees.
 - **Multiple modules** (`modules:` in config) are extracted separately and
   merged into one document; import paths keep the IDs disjoint.
+- **Filter (section 9).** Nodes on a `changed_paths` route are always drawn
+  and exempt from package collapse, so a route stays contiguous. Generated
+  and test nodes are never taken as context, not only excluded from the
+  focus set. The "never both a subgraph and a pkg node" rule is enforced
+  as: a package with a collapsed node draws its remaining symbols bare.
+  Mermaid identifiers are short hashes rather than sanitized names, so IDs
+  do not eat the character budget; labels carry the names.
+- **Package registry cache** uses one package name (`shapediff`) with the
+  cache key as the version, since the key already embeds the repo.
+- **Weekly page, known cosmetic defect:** the "Where change concentrated"
+  table groups by short name, so a sink (`orders`) can appear in the
+  Package column.
 
 ## What is a seam, not a payload
 

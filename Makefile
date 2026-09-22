@@ -18,6 +18,6 @@ fmt:
 	gofmt -l -w .
 
 conform: build
-	./bin/shapediff conform --fixtures conformance/go
+	./bin/shapediff conform --fixtures conformance/go --extractor "./bin/shapediff extract"
 
 check: fmt vet test conform

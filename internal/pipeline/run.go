@@ -239,11 +239,22 @@ func (deps *Deps) graphFor(ctx context.Context, env Env, repo, sha string, isHea
 }
 
 // extractionFailed is the failure mode: one warning line, posted only when a
-// note already exists (otherwise the artifact would carry it, but there is
-// no delta to write, so the log carries it), exit 0.
+// note already exists, and an empty delta written as the artifact so that a
+// reader can tell "the job failed" from "nothing structural" (spec 14.1
+// step 4: the delta document is always published). Exit 0.
 func (deps *Deps) extractionFailed(ctx context.Context, env Env, out Outcome, what string, err error) Outcome {
 	out.Warning = fmt.Sprintf("shapediff: %s extraction failed at %s: %v", what, shortSHA(out.HeadSHA), err)
 	deps.logf("%s", out.Warning)
+	empty := &delta.Delta{SchemaVersion: delta.SchemaVersion, Repo: env.Repo(), BaseSHA: out.BaseSHA, HeadSHA: out.HeadSHA, MRIID: env.MRIID,
+		Warnings: []string{out.Warning}}
+	art := filepath.Join(env.ProjectDir, ArtifactPath)
+	if err := os.MkdirAll(filepath.Dir(art), 0o755); err == nil {
+		if werr := empty.WriteFile(art); werr != nil {
+			deps.logf("write artifact: %v", werr)
+		} else {
+			out.Artifact = art
+		}
+	}
 	if deps.Notes == nil || env.MRIID == 0 {
 		return out
 	}

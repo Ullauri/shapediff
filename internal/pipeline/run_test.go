@@ -167,6 +167,12 @@ func TestExtractionFailureWarnsOnlyIfNoteExists(t *testing.T) {
 	if !out.Updated || !bytes.Contains([]byte(notes.notes[3]), []byte("extraction failed")) {
 		t.Fatalf("%+v %q", out, notes.notes[3])
 	}
+	if out.Artifact == "" {
+		t.Fatal("extraction failure must still write the delta artifact (spec 14.1 step 4)")
+	}
+	if ed, err := delta.ReadFile(out.Artifact); err != nil || ed.Stats.Structural || len(ed.Warnings) == 0 {
+		t.Fatalf("empty delta artifact: %v %+v", err, ed)
+	}
 }
 
 func TestNotesAPIFailureIsWarning(t *testing.T) {

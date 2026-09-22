@@ -57,13 +57,21 @@ type LLM struct {
 
 // Default returns the configuration with every field at its default.
 func Default() *Config {
+	c := base()
+	c.finalize()
+	return c
+}
+
+// base is the configuration before derived fields (edges from nodes) are
+// filled, so a file that sets nodes alone gets the derived edge cap.
+func base() *Config {
 	return &Config{
 		Modules:       []string{"."},
 		BuildTags:     []string{},
 		Ignore:        []string{"**/mocks/**", "**/testdata/**"},
 		Entrypoints:   map[string][]EntryPattern{},
 		Sinks:         map[string][]SinkPattern{},
-		Budget:        Budget{Chars: 1800, Nodes: 24, Edges: 36},
+		Budget:        Budget{Chars: 1800, Nodes: 24},
 		NarrowTargets: 2,
 		Narration:     "template",
 	}
@@ -72,9 +80,10 @@ func Default() *Config {
 // Load reads the config at path. A missing file yields the defaults; that is
 // the normal case. Any other read or parse error is returned.
 func Load(path string) (*Config, error) {
-	c := Default()
+	c := base()
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		c.finalize()
 		return c, nil
 	}
 	if err != nil {
@@ -83,6 +92,18 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(b, c); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	c.finalize()
+	switch c.Narration {
+	case "template", "llm", "off":
+	case "":
+		c.Narration = "template"
+	default:
+		return nil, fmt.Errorf("%s: narration must be template, llm or off, got %q", path, c.Narration)
+	}
+	return c, nil
+}
+
+func (c *Config) finalize() {
 	if len(c.Modules) == 0 {
 		c.Modules = []string{"."}
 	}
@@ -98,14 +119,6 @@ func Load(path string) (*Config, error) {
 	if c.NarrowTargets <= 0 {
 		c.NarrowTargets = 2
 	}
-	switch c.Narration {
-	case "template", "llm", "off":
-	case "":
-		c.Narration = "template"
-	default:
-		return nil, fmt.Errorf("%s: narration must be template, llm or off, got %q", path, c.Narration)
-	}
-	return c, nil
 }
 
 // LoadRepo loads the config from a repo root.

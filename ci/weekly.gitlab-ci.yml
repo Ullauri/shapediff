@@ -1,0 +1,62 @@
+# shapediff: scheduled weekly structure job (spec section 14.2), run from a
+# central "structure" project. Enable the schedule (Monday 06:00) only after
+# phase 3 has passed on at least one repo.
+#
+# The project holds:
+#   repos.yml        the repos to cover: slug, dir, branch, project, url
+#   layouts/         the pinned package layouts, committed back each week
+#
+# Variables:
+#   SHAPEDIFF_TOKEN   token that can read MRs on every covered repo, read/write
+#                     the graph cache, and write this project's wiki (Developer
+#                     role on this project, Reporter on the covered repos).
+#   SHAPEDIFF_CACHE   same setting as the per-MR job; must point at the SAME
+#                     cache the MR jobs write, or attribution finds nothing.
+#   SHAPEDIFF_IMAGE   image with the shapediff binary and the Go toolchain.
+
+variables:
+  SHAPEDIFF_IMAGE: "registry.example.com/platform/shapediff:latest"
+
+weekly-structure:
+  stage: deploy
+  image: $SHAPEDIFF_IMAGE
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+  variables:
+    GIT_DEPTH: 0
+  before_script:
+    # Clone each covered repo with full history so `git rev-list --before`
+    # can resolve main at the week's start and end. repos.yml entries look
+    # like:
+    #   - slug: group/svc
+    #     dir: checkouts/group__svc
+    #     branch: main
+    #     project: group/svc
+    #     url: https://gitlab.example.com/group/svc
+    - mkdir -p checkouts layouts
+    - |
+      grep -E '^\s*-?\s*slug:' repos.yml | sed -E 's/.*slug:\s*//' | while read -r slug; do
+        dir="checkouts/$(echo "$slug" | sed 's#/#__#g')"
+        [ -d "$dir/.git" ] || git clone -q "https://oauth2:${SHAPEDIFF_TOKEN}@${CI_SERVER_HOST}/${slug}.git" "$dir"
+        git -C "$dir" fetch -q --all
+      done
+  script:
+    - shapediff weekly --repos repos.yml -o weekly.md
+  after_script:
+    # Persist the pinned layouts so next week's diagram does not drift.
+    - |
+      if [ -n "$(git status --porcelain layouts)" ]; then
+        git config user.email "shapediff@ci"
+        git config user.name "shapediff"
+        git add layouts
+        git commit -qm "weekly: store package layouts for $(date -u +%G-W%V)"
+        git push -o ci.skip "https://oauth2:${SHAPEDIFF_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" HEAD:${CI_DEFAULT_BRANCH}
+      fi
+  artifacts:
+    when: always
+    paths:
+      - weekly.md
+      - layouts/
+  allow_failure: true

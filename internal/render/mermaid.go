@@ -15,12 +15,15 @@ import (
 const Legend = "Legend: green added, red dashed removed, amber signature changed, grey context; `*` body also changed; dashed edge dynamic dispatch, dotted edge inferred."
 
 // classDefs is the styling preamble. It counts against the character budget.
-const classDefs = `  classDef added fill:#dcfce7,stroke:#16a34a
-  classDef removed fill:#fff1f2,stroke:#dc2626,stroke-dasharray:5 3
-  classDef signature_changed fill:#fef3c7,stroke:#d97706
-  classDef context fill:#f3f4f6,stroke:#9ca3af
-  classDef query fill:#dbeafe,stroke:#2563eb
-  classDef more fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:2 2
+// Every class sets color as well as fill: Mermaid otherwise takes the text
+// colour from the viewer theme, and a dark theme puts light text on these
+// pastel fills, hiding every label.
+const classDefs = `  classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
+  classDef removed fill:#fff1f2,stroke:#dc2626,stroke-dasharray:5 3,color:#1f2937
+  classDef signature_changed fill:#fef3c7,stroke:#d97706,color:#1f2937
+  classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
+  classDef query fill:#dbeafe,stroke:#2563eb,color:#1f2937
+  classDef more fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:2 2,color:#1f2937
 `
 
 // Mermaid renders one diagram as flowchart LR source (without fences).

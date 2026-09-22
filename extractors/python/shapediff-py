@@ -1,0 +1,821 @@
+#!/usr/bin/env python3
+"""shapediff Python extractor under the plug-in contract of spec 6.3.
+
+Invoked as  shapediff-py --repo <dir> --config <path>  and writes one schema
+v1 graph document to stdout. Syntactic (``ast``), stdlib only, no imports
+executed. Resolution is by import binding, so every edge it emits is
+``resolved`` except calls through a function value (``dynamic``); nothing is
+name-matched. The extractor declares ``precision: inferred`` because it has
+no type checker behind it.
+
+What it maps (Python shape on the Go-shaped schema):
+  package     one per module file; the import path is the file path without
+              ``.py`` (``backend/app/routers/pipelines``), ``__init__`` stripped
+  symbol      top-level def -> func, class -> type, method -> ``Class.m``
+              (method), module assignment -> var (UPPER_CASE -> const)
+  entrypoint  FastAPI ``@router.<verb>("/path")`` -> ``entry:http:VERB
+              <router prefix><path>``; ``@mcp.tool()`` / ``@mcp.resource(uri)``
+              -> ``entry:cli:...``
+  sink        SQLAlchemy session calls -> ``sink:db:<__tablename__>`` when the
+              statement names exactly one mapped class (source ``table``),
+              else ``sink:db:sqlalchemy`` (source ``package``); httpx /
+              requests / aiohttp calls -> ``sink:http_client:<module>``
+  edges       imports (package -> package, third-party collapsed to one node
+              per distribution, stdlib not drawn), calls (import-bound, plus
+              ``self.m()`` and a function passed as a value: dynamic,
+              targets 1), handles, reads / writes, implements (class ->
+              internal base)
+"""
+
+import argparse
+import ast
+import fnmatch
+import hashlib
+import io
+import json
+import os
+import re
+import subprocess
+import sys
+import tokenize
+
+NAME = "py-ast"
+VERSION = "0.1.0"
+SKETCH = 64
+M64 = (1 << 64) - 1
+STDLIB = set(getattr(sys, "stdlib_module_names", ()))
+SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache",
+             ".ruff_cache", ".pytest_cache", "build", "dist", ".eggs", "site-packages"}
+DEFAULT_CONFIG = {
+    "modules": ["."],
+    "build_tags": [],
+    "ignore": ["**/mocks/**", "**/testdata/**"],
+    "entrypoints": {},
+    "sinks": {},
+    "budget": {"chars": 1800, "nodes": 24, "edges": 36},
+    "narrow_targets": 2,
+    "narration": "template",
+    "llm": {"endpoint": "", "model": "", "api_key_env": "SHAPEDIFF_LLM_KEY"},
+}
+HTTP_VERBS = {"get", "post", "put", "patch", "delete", "head", "options"}
+DB_READS = {"execute", "scalars", "scalar", "scalar_one", "scalar_one_or_none", "get",
+            "get_one", "stream", "stream_scalars", "exec"}
+DB_WRITES = {"add", "add_all", "delete", "merge", "bulk_save_objects"}
+DB_RECEIVER = re.compile(r"(^|\.)(db|session|_db|_session|sess)$")
+SQL_WRITE_FUNCS = {"update", "delete", "insert"}
+HTTP_LIBS = {"httpx", "requests", "aiohttp", "urllib3"}
+READ_VERBS = ("get", "list", "find", "fetch", "load", "read", "select", "count", "exists", "query", "search", "has")
+HTTP_METHODS = {"get", "post", "put", "patch", "delete", "request", "stream", "send"}
+GENERATED = re.compile(r"code generated|do not edit|auto-?generated", re.I)
+
+
+# ---------------------------------------------------------------- hashing
+
+def fnv64a(b: bytes) -> int:
+    h = 0xCBF29CE484222325
+    for c in b:
+        h ^= c
+        h = (h * 0x100000001B3) & M64
+    return h
+
+
+def minhash(tokens):
+    sk = [0xFFFFFFFF] * SKETCH
+    for t in sorted(set(tokens)):
+        base = fnv64a(t.encode("utf-8"))
+        for i in range(SKETCH):
+            z = base ^ ((0x9E3779B97F4A7C15 * (i + 1)) & M64)
+            z = ((z ^ (z >> 30)) * 0xBF58476D1CE4E5B9) & M64
+            z = ((z ^ (z >> 27)) * 0x94D049BB133111EB) & M64
+            z ^= z >> 31
+            v = z & 0xFFFFFFFF
+            if v < sk[i]:
+                sk[i] = v
+    return sk
+
+
+def tsum(tokens):
+    return hashlib.sha256("\x00".join(tokens).encode("utf-8")).hexdigest()
+
+
+LITERAL_KINDS = {tokenize.NUMBER: "$NUMBER", tokenize.STRING: "$STRING"}
+for _n in ("FSTRING_START", "FSTRING_MIDDLE", "FSTRING_END"):
+    if hasattr(tokenize, _n):
+        LITERAL_KINDS[getattr(tokenize, _n)] = "$STRING"
+KEEP = {tokenize.NAME, tokenize.OP} | set(LITERAL_KINDS)
+
+
+def file_tokens(src):
+    """Every significant token of a module with its start position."""
+    out = []
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+            if tok.type in KEEP:
+                out.append(tok)
+    except (tokenize.TokenError, SyntaxError):
+        pass
+    return out
+
+
+def body_hashes(toks, start, end, recv):
+    """Body fields for the tokens in [start, end] (row, col) inclusive."""
+    norm, raw, rec = [], [], []
+    for t in toks:
+        if t.start < start or t.start > end:
+            continue
+        if t.type in LITERAL_KINDS:
+            n = LITERAL_KINDS[t.type]
+        else:
+            n = t.string
+        norm.append(n)
+        raw.append(t.string)
+        rec.append("$RECV" if recv and t.type == tokenize.NAME and t.string == recv else n)
+    h = {"fingerprint": tsum(norm), "body_hash": tsum(raw), "body_tokens": len(norm),
+         "body_sketch": minhash(norm)}
+    if recv:
+        h["fingerprint_recv"] = tsum(rec)
+    return h
+
+
+# ---------------------------------------------------------------- config
+
+def load_config(path):
+    cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+    warnings = []
+    if path and os.path.exists(path):
+        try:
+            import yaml  # type: ignore
+            with open(path) as f:
+                user = yaml.safe_load(f) or {}
+            for k, v in user.items():
+                cfg[k] = v
+        except ImportError:
+            warnings.append(f"config {path} present but PyYAML is not importable; defaults used")
+    h = hashlib.sha256(json.dumps(cfg, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return cfg, h, warnings
+
+
+# ---------------------------------------------------------------- modules
+
+class Module:
+    def __init__(self, rel, root, mroot="."):
+        self.rel = rel                       # path relative to repo, posix
+        p = rel[:-3]
+        if p.endswith("/__init__") or p == "__init__":
+            p = p[: -len("/__init__")] if "/" in p else "."
+        self.pkg = p                         # import path, slash form (repo-relative)
+        # the dotted name is relative to the module root (sys.path entry), so a
+        # src/ layout or a non-root modules: entry still resolves absolute imports
+        q = p
+        if mroot not in (".", "") and (q == mroot or q.startswith(mroot + "/")):
+            q = q[len(mroot):].lstrip("/") or "."
+        self.dotted = q.replace("/", ".") if q != "." else ""
+        self.name = p.rsplit("/", 1)[-1] if p != "." else os.path.basename(root)
+        self.is_init = rel.endswith("__init__.py")
+        parts = rel.split("/")
+        base = parts[-1]
+        self.test = "tests" in parts[:-1] or "test" in parts[:-1] or base.startswith("test_") \
+            or base.endswith("_test.py") or base == "conftest.py"
+        self.tree = None
+        self.status = "ok"
+        self.src = ""
+        self.toks = []
+        self.generated = False
+        self.bindings = {}                   # local name -> ("mod", dotted) | ("sym", dotted, name) | ("ext", top)
+        self.import_targets = set()          # dotted module names imported (internal or external top)
+        self.defs = {}                       # top-level name -> "func" | "type" | "var" | "const"
+        self.classes = {}                    # class name -> {"methods": set, "bases": [expr], "table": str|None}
+        self.routers = {}                    # var name -> prefix
+        self.mcp = set()
+
+
+def walk_files(root, cfg):
+    files = []
+    ignore = list(cfg.get("ignore") or [])
+    for mroot in cfg.get("modules") or ["."]:
+        top = os.path.normpath(os.path.join(root, mroot))
+        for d, dirs, fs in os.walk(top):
+            dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS and not x.startswith("."))
+            for f in sorted(fs):
+                if not f.endswith(".py"):
+                    continue
+                rel = os.path.relpath(os.path.join(d, f), root).replace(os.sep, "/")
+                if any(fnmatch.fnmatch(rel, g) or fnmatch.fnmatch("/" + rel, g) for g in ignore):
+                    continue
+                files.append((rel, os.path.normpath(mroot).replace(os.sep, "/")))
+    return sorted(set(files))
+
+
+def dotted_of(node):
+    """a.b.c for a Name/Attribute chain, else None."""
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+        return ".".join(reversed(parts))
+    return None
+
+
+class Repo:
+    def __init__(self, root, cfg):
+        self.root = root
+        self.cfg = cfg
+        self.modules = {}        # dotted -> Module
+        self.by_pkg = {}
+        self.warnings = []
+
+    # ---- pass 1: parse and index
+    def load(self):
+        for rel, mroot in walk_files(self.root, self.cfg):
+            m = Module(rel, self.root, mroot)
+            try:
+                with open(os.path.join(self.root, rel), encoding="utf-8") as f:
+                    m.src = f.read()
+                m.tree = ast.parse(m.src, filename=rel)
+            except (SyntaxError, UnicodeDecodeError, ValueError, OSError) as e:
+                m.status = "failed"
+                self.warnings.append(f"{rel}: not parsed: {e.__class__.__name__}: {e}")
+            m.generated = bool(GENERATED.search("\n".join(m.src.splitlines()[:5])))
+            self.modules[m.dotted] = m
+            self.by_pkg[m.pkg] = m
+        for m in self.modules.values():
+            if m.tree is not None:
+                m.toks = file_tokens(m.src)
+                self.index(m)
+
+    def is_pkg(self, dotted):
+        """dotted names a module, or a directory (namespace package) that holds one."""
+        return dotted in self.modules or any(k.startswith(dotted + ".") for k in self.modules)
+
+    def resolve_from(self, m, node):
+        if node.level:
+            base = m.dotted if m.is_init else m.dotted.rsplit(".", 1)[0] if "." in m.dotted else ""
+            for _ in range(node.level - 1):
+                base = base.rsplit(".", 1)[0] if "." in base else ""
+            return f"{base}.{node.module}" if node.module and base else (node.module or base)
+        return node.module or ""
+
+    def bind_import(self, m, dotted_target, alias_names):
+        top = dotted_target.split(".")[0]
+        if dotted_target in self.modules:
+            m.import_targets.add(dotted_target)
+            return ("mod", dotted_target)
+        if top in STDLIB or not top:
+            return None
+        if self.is_pkg(top):
+            return None  # internal path that is not a module
+        m.import_targets.add(top)
+        return ("ext", top)
+
+    @staticmethod
+    def top_statements(body):
+        """Module-level statements, looking through if/try blocks (TYPE_CHECKING, ImportError fallbacks)."""
+        for node in body:
+            if isinstance(node, ast.If):
+                yield from Repo.top_statements(node.body)
+                yield from Repo.top_statements(node.orelse)
+            elif isinstance(node, ast.Try):
+                yield from Repo.top_statements(node.body)
+                for h in node.handlers:
+                    yield from Repo.top_statements(h.body)
+                yield from Repo.top_statements(node.orelse)
+                yield from Repo.top_statements(node.finalbody)
+            else:
+                yield node
+
+    def index(self, m):
+        t = m.tree
+        for node in self.top_statements(t.body):
+            if isinstance(node, ast.Import):
+                for a in node.names:
+                    b = self.bind_import(m, a.name, None)
+                    if b is None:
+                        continue
+                    if a.asname:
+                        m.bindings[a.asname] = b
+                    else:
+                        root = a.name.split(".")[0]
+                        m.bindings[root] = ("mod", root) if self.is_pkg(root) else ("ext", root)
+                        if root in self.modules:
+                            m.import_targets.add(root)
+            elif isinstance(node, ast.ImportFrom):
+                base = self.resolve_from(m, node)
+                for a in node.names:
+                    if a.name == "*":
+                        continue
+                    local = a.asname or a.name
+                    full = f"{base}.{a.name}" if base else a.name
+                    if full in self.modules:
+                        m.bindings[local] = ("mod", full)
+                        m.import_targets.add(full)
+                    elif base in self.modules:
+                        m.bindings[local] = ("sym", base, a.name)
+                        m.import_targets.add(base)
+                    else:
+                        b = self.bind_import(m, base or a.name, None)
+                        if b:
+                            m.bindings[local] = b
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                m.defs[node.name] = "func"
+            elif isinstance(node, ast.ClassDef):
+                m.defs[node.name] = "type"
+                self.index_class(m, node, node.name)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for tg in targets:
+                    if isinstance(tg, ast.Name):
+                        m.defs[tg.id] = "const" if tg.id.isupper() else "var"
+                        val = node.value
+                        if isinstance(val, ast.Call):
+                            fn = dotted_of(val.func) or ""
+                            if fn.rsplit(".", 1)[-1] in ("APIRouter", "FastAPI"):
+                                prefix = ""
+                                for kw in val.keywords:
+                                    if kw.arg == "prefix" and isinstance(kw.value, ast.Constant):
+                                        prefix = str(kw.value.value)
+                                m.routers[tg.id] = prefix
+                            if fn.rsplit(".", 1)[-1] in ("FastMCP", "MCP"):
+                                m.mcp.add(tg.id)
+
+    def index_class(self, m, node, qual):
+        info = {"methods": set(), "bases": node.bases, "table": None, "node": node}
+        for b in node.body:
+            if isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                info["methods"].add(b.name)
+            elif isinstance(b, ast.ClassDef):
+                m.defs[f"{qual}.{b.name}"] = "type"
+                self.index_class(m, b, f"{qual}.{b.name}")
+            elif isinstance(b, (ast.Assign, ast.AnnAssign)):
+                tgs = b.targets if isinstance(b, ast.Assign) else [b.target]
+                for tg in tgs:
+                    if isinstance(tg, ast.Name) and tg.id == "__tablename__" and isinstance(b.value, ast.Constant):
+                        info["table"] = str(b.value.value)
+        m.classes[qual] = info
+
+    # ---- resolution helpers
+    def sym_of(self, m, name, locals_=frozenset()):
+        """Resolve a bare name in module m to (module, qualified) or None."""
+        if name in locals_:
+            return None
+        if name in m.defs:
+            return (m, name)
+        b = m.bindings.get(name)
+        if b and b[0] == "sym":
+            tm = self.modules[b[1]]
+            if b[2] in tm.defs:
+                return (tm, b[2])
+            # re-exported through a package __init__
+            inner = tm.bindings.get(b[2])
+            if inner and inner[0] == "sym":
+                im = self.modules[inner[1]]
+                if inner[2] in im.defs:
+                    return (im, inner[2])
+            if inner and inner[0] == "mod":
+                return None
+        return None
+
+    def class_of(self, m, name):
+        r = self.sym_of(m, name)
+        if r and r[0].defs.get(r[1]) == "type":
+            return r
+        return None
+
+    def resolve_callee(self, m, func, cls, locals_=frozenset()):
+        """(module, qualified) of the declared callee, or None."""
+        if isinstance(func, ast.Name):
+            return self.sym_of(m, func.id, locals_)
+        if isinstance(func, ast.Attribute):
+            chain = dotted_of(func)
+            if chain is None:
+                return None
+            parts = chain.split(".")
+            root, rest = parts[0], parts[1:]
+            if root in ("self", "cls") and cls and len(rest) == 1:
+                return self.find_method(m, cls, rest[0])
+            if root in locals_:
+                return None
+            b = m.bindings.get(root)
+            if b and b[0] == "mod":
+                # import a.b.c binds 'a': the longest module prefix of the chain wins
+                for i in range(len(rest), 0, -1):
+                    d = ".".join([b[1]] + rest[:i])
+                    if d in self.modules:
+                        return self.resolve_in_module(self.modules[d], rest[i:])
+                if b[1] in self.modules:
+                    return self.resolve_in_module(self.modules[b[1]], rest)
+                return None
+            c = self.class_of(m, root)
+            if c and len(rest) == 1:
+                return self.find_method(c[0], c[1], rest[0])
+        return None
+
+    def resolve_in_module(self, tm, rest):
+        if len(rest) == 1 and rest[0] in tm.defs:
+            return (tm, rest[0])
+        if len(rest) == 2 and rest[0] in tm.classes:
+            return self.find_method(tm, rest[0], rest[1])
+        if len(rest) >= 1:
+            # a symbol re-exported by a package __init__
+            b = tm.bindings.get(rest[0])
+            if b and b[0] == "mod" and len(rest) > 1:
+                return self.resolve_in_module(self.modules[b[1]], rest[1:])
+            if b and b[0] == "sym" and len(rest) == 1:
+                return self.sym_of(tm, rest[0])
+        return None
+
+    def find_method(self, m, cls, meth, depth=0):
+        info = m.classes.get(cls)
+        if info is None or depth > 8:
+            return None
+        if meth in info["methods"]:
+            return (m, f"{cls}.{meth}")
+        for b in info["bases"]:
+            bd = dotted_of(b)
+            if not bd:
+                continue
+            c = self.class_of(m, bd) if "." not in bd else None
+            if c is None and "." in bd:
+                r = self.resolve_callee(m, ast.parse(bd, mode="eval").body, None)
+                c = r if r and r[0].defs.get(r[1]) == "type" else None
+            if c:
+                found = self.find_method(c[0], c[1], meth, depth + 1)
+                if found:
+                    return found
+        return None
+
+    def internal_bases(self, m, cls):
+        out = []
+        for b in m.classes[cls]["bases"]:
+            bd = dotted_of(b)
+            if not bd:
+                continue
+            if "." in bd:
+                r = self.resolve_callee(m, ast.parse(bd, mode="eval").body, None)
+            else:
+                r = self.class_of(m, bd)
+            if r and r[0].defs.get(r[1]) == "type":
+                out.append(r)
+        return out
+
+    def table_of(self, m, name):
+        c = self.class_of(m, name)
+        if c:
+            return c[0].classes.get(c[1], {}).get("table")
+        return None
+
+
+# ---------------------------------------------------------------- extraction
+
+class Extractor:
+    def __init__(self, repo):
+        self.r = repo
+        self.nodes = {}
+        self.edges = {}          # (from,to,kind) -> attrs
+        self.packages = {}
+        self.warnings = list(repo.warnings)
+
+    def sym_id(self, m, qual):
+        return f"sym:{m.pkg}.{qual}"
+
+    def add_node(self, nid, **kw):
+        if nid not in self.nodes:
+            self.nodes[nid] = kw
+        return self.nodes[nid]
+
+    def add_edge(self, f, t, kind, conf="resolved", dynamic=False, targets=None, sites=0):
+        k = (f, t, kind)
+        e = self.edges.get(k)
+        if e is None:
+            e = self.edges[k] = {"from": f, "to": t, "kind": kind, "confidence": conf,
+                                 "attrs": {"dynamic": dynamic}}
+            if dynamic:
+                e["attrs"]["targets"] = targets if targets is not None else 1
+            if kind == "calls":
+                e["attrs"]["sites"] = 0
+        if kind == "calls":
+            e["attrs"]["sites"] += max(sites, 1)
+        return e
+
+    def run(self):
+        r = self.r
+        for m in r.modules.values():
+            if m.status == "failed":
+                self.packages[f"pkg:{m.pkg}"] = "failed"
+                continue
+            self.packages[f"pkg:{m.pkg}"] = "ok"
+            self.add_node(f"pkg:{m.pkg}", kind="package", name=m.name, package=m.pkg,
+                          attrs={"exported": False, "generated": m.generated, "test": m.test})
+            for tgt in sorted(m.import_targets):
+                if tgt in r.modules:
+                    tm = r.modules[tgt]
+                    if tm.status == "failed":
+                        continue
+                    to = f"pkg:{tm.pkg}"
+                else:
+                    to = f"pkg:{tgt}"
+                    self.packages[to] = "ok"
+                    self.add_node(to, kind="package", name=tgt, package=tgt,
+                                  attrs={"exported": False, "generated": False, "test": False})
+                if to != f"pkg:{m.pkg}":
+                    self.add_edge(f"pkg:{m.pkg}", to, "imports")
+        for m in r.modules.values():
+            if m.tree is not None:
+                self.module_symbols(m)
+
+    def base_attrs(self, m, name):
+        return {"exported": not name.rsplit(".", 1)[-1].startswith("_"),
+                "generated": m.generated, "test": m.test}
+
+    def module_symbols(self, m):
+        for node in m.tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self.function(m, node, None, node.name)
+            elif isinstance(node, ast.ClassDef):
+                self.klass(m, node, node.name)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for tg in targets:
+                    if isinstance(tg, ast.Name):
+                        kind = m.defs.get(tg.id, "var")
+                        sig = ast.unparse(node.annotation) if isinstance(node, ast.AnnAssign) else kind
+                        a = self.base_attrs(m, tg.id)
+                        a.update(symbol_kind=kind, signature=sig)
+                        self.add_node(self.sym_id(m, tg.id), kind="symbol", name=tg.id, package=m.pkg,
+                                      file=m.rel, line=node.lineno, attrs=a)
+
+    def klass(self, m, node, qual):
+        a = self.base_attrs(m, qual)
+        a.update(symbol_kind="type", signature="class")
+        nid = self.sym_id(m, qual)
+        self.add_node(nid, kind="symbol", name=qual, package=m.pkg, file=m.rel, line=node.lineno, attrs=a)
+        for bm, bq in self.r.internal_bases(m, qual):
+            self.add_edge(nid, self.sym_id(bm, bq), "implements")
+        for b in node.body:
+            if isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self.function(m, b, qual, f"{qual}.{b.name}")
+            elif isinstance(b, ast.ClassDef):
+                self.klass(m, b, f"{qual}.{b.name}")
+
+    def function(self, m, node, cls, qual):
+        nid = self.sym_id(m, qual)
+        a = self.base_attrs(m, qual)
+        kw = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
+        sig = f"{kw} {qual}({ast.unparse(node.args)})"
+        if node.returns is not None:
+            sig += f" -> {ast.unparse(node.returns)}"
+        a.update(symbol_kind="method" if cls else "func", signature=sig)
+        body = node.body
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+                and isinstance(body[0].value.value, str):
+            body = body[1:]
+        recv = cls.rsplit(".", 1)[-1] if cls else None
+        if body:
+            h = body_hashes(m.toks, (body[0].lineno, body[0].col_offset),
+                            (body[-1].end_lineno, body[-1].end_col_offset - 1), recv)
+        else:
+            h = body_hashes(m.toks, (1 << 30, 0), (0, 0), recv)
+        n = self.add_node(nid, kind="symbol", name=qual, package=m.pkg, file=m.rel, line=node.lineno, attrs=a)
+        n.update(h)
+        if cls is None:
+            self.entrypoints(m, node, nid)
+        self.calls(m, node, cls, nid)
+
+    # ---- entry points
+    def entrypoints(self, m, node, nid):
+        for d in node.decorator_list:
+            if not isinstance(d, ast.Call) or not isinstance(d.func, ast.Attribute):
+                continue
+            chain = dotted_of(d.func)
+            if not chain or "." not in chain:
+                continue
+            root, verb = chain.rsplit(".", 1)
+            prefix = m.routers.get(root)
+            if prefix is None:
+                b = m.bindings.get(root)
+                if b and b[0] == "sym":
+                    prefix = self.r.modules[b[1]].routers.get(b[2])
+            if prefix is not None and verb in HTTP_VERBS | {"api_route", "route"}:
+                path = d.args[0].value if d.args and isinstance(d.args[0], ast.Constant) else None
+                if path is None:
+                    continue
+                verbs = [verb.upper()] if verb in HTTP_VERBS else []
+                for kwd in d.keywords:
+                    if kwd.arg == "methods" and isinstance(kwd.value, (ast.List, ast.Tuple)):
+                        verbs = [str(e.value).upper() for e in kwd.value.elts if isinstance(e, ast.Constant)]
+                for v in verbs:
+                    self.entry("http", f"{v} {prefix}{path}", m, nid)
+            elif verb in ("tool", "resource", "prompt") and (
+                    root in m.mcp or (m.bindings.get(root, ("",))[0] == "sym"
+                                      and m.bindings[root][2] in self.r.modules[m.bindings[root][1]].mcp)):
+                name = node.name
+                if verb == "resource" and d.args and isinstance(d.args[0], ast.Constant):
+                    name = str(d.args[0].value)
+                self.entry("cli", f"mcp {verb} {name}", m, nid)
+
+    def entry(self, kind, name, m, handler):
+        eid = f"entry:{kind}:{name}"
+        if eid in self.nodes:
+            self.warnings.append(f"duplicate entry point {eid}; second registration in {m.rel} ignored")
+            return
+        self.add_node(eid, kind="entrypoint", name=name, package=m.pkg,
+                      attrs={"exported": False, "generated": m.generated, "test": m.test, "entry_kind": kind})
+        self.add_edge(eid, handler, "handles")
+
+    # ---- calls and sinks
+    def calls(self, m, fn, cls, nid):
+        r = self.r
+        var_tables = {}
+        var_writes = {}
+
+        def names_in(expr):
+            out = set()
+            for x in ast.walk(expr):
+                if isinstance(x, ast.Name):
+                    out.add(x.id)
+            return out
+
+        def tables_of(expr):
+            tabs, writes = set(), False
+            for x in ast.walk(expr):
+                if isinstance(x, ast.Name):
+                    t = r.table_of(m, x.id)
+                    if t:
+                        tabs.add(t)
+                    if x.id in var_tables:
+                        tabs |= var_tables[x.id]
+                        writes = writes or var_writes.get(x.id, False)
+                elif isinstance(x, ast.Attribute):
+                    root = dotted_of(x)
+                    if root and "." in root:
+                        t = r.table_of(m, root.split(".")[0])
+                        if t:
+                            tabs.add(t)
+                elif isinstance(x, ast.Call):
+                    fname = dotted_of(x.func) or ""
+                    if fname.rsplit(".", 1)[-1] in SQL_WRITE_FUNCS and not isinstance(x.func, ast.Attribute):
+                        writes = True
+            return tabs, writes
+
+        # light dataflow: statement -> tables, in source order
+        for st in ast.walk(fn):
+            if isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Name):
+                tabs, w = tables_of(st.value)
+                v = st.targets[0].id
+                var_tables[v] = var_tables.get(v, set()) | tabs
+                var_writes[v] = var_writes.get(v, False) or w
+
+        # names bound inside the function shadow module-level ones
+        locals_ = set()
+        for x in ast.walk(fn):
+            if isinstance(x, ast.arg):
+                locals_.add(x.arg)
+            elif isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and x is not fn:
+                locals_.add(x.name)
+            elif isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store):
+                locals_.add(x.id)
+            elif isinstance(x, (ast.Global, ast.Nonlocal)):
+                locals_.difference_update(x.names)
+        locals_ = frozenset(locals_)
+
+        # Depends(x) in the signature and function values passed anywhere
+        for call in [x for x in ast.walk(fn) if isinstance(x, ast.Call)]:
+            self.call(m, call, cls, nid, tables_of, locals_)
+
+    def call(self, m, call, cls, nid, tables_of, locals_):
+        r = self.r
+        target = r.resolve_callee(m, call.func, cls, locals_)
+        if target:
+            tm, tq = target
+            tid = self.sym_id(tm, tq)
+            self.add_edge(nid, tid, "calls", sites=1)
+        # function values passed as arguments (Depends(get_db), add_task(fn))
+        for arg in list(call.args) + [k.value for k in call.keywords]:
+            if isinstance(arg, (ast.Name, ast.Attribute)):
+                t = r.resolve_callee(m, arg, cls, locals_) if isinstance(arg, ast.Attribute) else r.sym_of(m, arg.id, locals_)
+                if t and t[0].defs.get(t[1].split(".")[0]) in ("func", "type") and \
+                        (t[0].defs.get(t[1]) == "func" or "." in t[1]):
+                    self.add_edge(nid, self.sym_id(*t), "calls", dynamic=True, targets=1, sites=1)
+        # sinks
+        if isinstance(call.func, ast.Attribute):
+            recv = dotted_of(call.func.value) or ast.unparse(call.func.value)
+            meth = call.func.attr
+            if DB_RECEIVER.search(recv) and (meth in DB_READS or meth in DB_WRITES):
+                tabs, w = set(), meth in DB_WRITES
+                for a in list(call.args) + [k.value for k in call.keywords]:
+                    t2, w2 = tables_of(a)
+                    tabs |= t2
+                    w = w or w2
+                if len(tabs) == 1:
+                    self.sink("db", next(iter(tabs)), "table", nid, "writes" if w else "reads")
+                else:
+                    self.sink("db", "sqlalchemy", "package", nid, "writes" if w else "reads")
+            root = recv.split(".")[0]
+            b = m.bindings.get(root)
+            if meth in HTTP_METHODS:
+                lib = None
+                if b and b[0] == "ext" and b[1] in HTTP_LIBS:
+                    lib = b[1]
+                elif root in HTTP_LIBS:
+                    lib = root
+                elif "client" in recv.lower():
+                    libs = {v[1] for v in m.bindings.values() if v[0] == "ext" and v[1] in HTTP_LIBS}
+                    lib = next(iter(libs)) if len(libs) == 1 else None
+                if lib:
+                    self.sink("http_client", lib, "package", nid, "writes")
+        # calls into a package the config declares as a sink (spec 13, sinks.<kind>[].package)
+        if target:
+            for kind, entries in (self.r.cfg.get("sinks") or {}).items():
+                for ent in entries or []:
+                    pkg = str(ent.get("package", "")).replace(".", "/") if isinstance(ent, dict) else ""
+                    inside = lambda p: p == pkg or p.startswith(pkg + "/")
+                    if pkg and inside(target[0].pkg) and not inside(m.pkg):
+                        verb = target[1].rsplit(".", 1)[-1].lower()
+                        reads = kind in ("db", "cache") and verb.startswith(READ_VERBS)
+                        self.sink(kind, pkg.rsplit("/", 1)[-1], "package", nid, "reads" if reads else "writes")
+
+    def sink(self, kind, name, source, frm, edge):
+        sid = f"sink:{kind}:{name}"
+        self.add_node(sid, kind="sink", name=name, package="",
+                      attrs={"exported": False, "generated": False, "test": False,
+                             "sink_kind": kind, "sink_name_source": source})
+        self.add_edge(frm, sid, edge)
+
+    # ---- document
+    def document(self, repo_slug, sha, config_hash):
+        nodes = []
+        for nid in sorted(self.nodes):
+            n = self.nodes[nid]
+            out = {"id": nid, "kind": n["kind"], "name": n["name"], "package": n["package"]}
+            if n.get("file"):
+                out["file"] = n["file"]
+            if n.get("line"):
+                out["line"] = n["line"]
+            out["attrs"] = n["attrs"]
+            for k in ("fingerprint", "fingerprint_recv", "body_hash", "body_tokens", "body_sketch"):
+                if k in n:
+                    out[k] = n[k]
+            nodes.append(out)
+        edges = [self.edges[k] for k in sorted(self.edges)]
+        return {
+            "schema_version": 1,
+            "repo": repo_slug,
+            "sha": sha,
+            "extractor": {
+                "name": NAME, "version": VERSION, "precision": "inferred",
+                "toolchain": "python" + ".".join(str(x) for x in sys.version_info[:3]),
+                "config_hash": config_hash, "builder_mode": None,
+            },
+            "packages": [{"id": p, "load_status": self.packages[p]} for p in sorted(self.packages)],
+            "nodes": nodes,
+            "edges": edges,
+            "warnings": sorted(set(self.warnings)),
+        }
+
+
+# ---------------------------------------------------------------- main
+
+def git(root, *args):
+    try:
+        return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True,
+                              check=True).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+
+
+def repo_slug(root):
+    url = git(root, "remote", "get-url", "origin")
+    if url:
+        path = re.sub(r"\.git$", "", url.split(":")[-1]).strip("/")
+        parts = path.split("/")
+        if len(parts) >= 2:
+            return "/".join(parts[-2:])
+    return os.path.basename(os.path.abspath(root))
+
+
+def main():
+    ap = argparse.ArgumentParser(description="shapediff Python extractor (plug-in contract, spec 6.3)")
+    ap.add_argument("--repo", default=".")
+    ap.add_argument("--config", default="")
+    ap.add_argument("--sha", default="")
+    ap.add_argument("--repo-slug", default="")
+    args = ap.parse_args()
+    root = os.path.abspath(args.repo)
+    if not os.path.isdir(root):
+        sys.exit(f"shapediff-py: no such directory: {root}")
+    cfg_path = args.config or os.path.join(root, ".shapediff.yml")
+    cfg, chash, cfg_warnings = load_config(cfg_path)
+    repo = Repo(root, cfg)
+    repo.load()
+    ex = Extractor(repo)
+    ex.warnings.extend(cfg_warnings)
+    ex.run()
+    sha = args.sha or git(root, "rev-parse", "HEAD") or "unknown"
+    doc = ex.document(args.repo_slug or repo_slug(root), sha, chash)
+    json.dump(doc, sys.stdout, indent=1)
+    sys.stdout.write("\n")
+
+
+if __name__ == "__main__":
+    main()

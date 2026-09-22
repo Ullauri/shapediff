@@ -1,0 +1,19 @@
+scenario: func-moved-between-files
+tier_a:
+- present:
+    in: both
+    id: sym:example.com/fx/orders.Validate
+- field_differs:
+    id: sym:example.com/fx/orders.Validate
+    field: file
+- field_equal:
+    id: sym:example.com/fx/orders.Validate
+    field: fingerprint
+tier_b:
+- counts:
+    added: 0
+    removed: 0
+    renamed: 0
+    edges_added: 0
+    edges_removed: 0
+- structural: false

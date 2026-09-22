@@ -1,0 +1,27 @@
+language: go
+extractor: builtin
+scenarios:
+  symbol-rename:
+    status: present
+  type-rename:
+    status: present
+  package-move:
+    status: present
+  route-rename:
+    status: present
+  func-moved-between-files:
+    status: present
+  literal-changed:
+    status: present
+  file-added-init-closure:
+    status: present
+  interface-dispatch:
+    status: present
+  generated-and-test:
+    status: present
+  entrypoint-registered:
+    status: present
+  sink-called:
+    status: present
+  package-broken-at-head:
+    status: present

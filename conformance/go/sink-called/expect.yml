@@ -1,0 +1,31 @@
+scenario: sink-called
+tier_a:
+- absent:
+    in: base
+    id: sink:db:orders
+- present:
+    in: head
+    id: sink:db:orders
+- attr_equal:
+    in: head
+    id: sink:db:orders
+    field: sink_name_source
+    value: table
+- edge:
+    in: head
+    from: sym:example.com/fx/db.(*Queries).InsertOrder
+    to: sink:db:orders
+    kind: writes
+- edge:
+    in: head
+    from: sym:example.com/fx/db.(*Queries).CountOrders
+    to: sink:db:orders
+    kind: reads
+tier_b:
+- entrypoint:
+    id: entry:http:POST /orders
+    status: reach_changed
+- reach_added:
+    id: entry:http:POST /orders
+    contains: sink:db:orders
+- structural: true

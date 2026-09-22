@@ -1,0 +1,16 @@
+scenario: package-broken-at-head
+tier_a:
+- load_status:
+    in: head
+    package: pkg:example.com/fx/db
+    is: partial
+- load_status:
+    in: base
+    package: pkg:example.com/fx/db
+    is: ok
+tier_b:
+- counts:
+    removed: 0
+    edges_removed: 0
+- suppressed:
+    package: pkg:example.com/fx/db

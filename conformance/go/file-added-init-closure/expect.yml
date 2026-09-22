@@ -1,0 +1,13 @@
+scenario: file-added-init-closure
+tier_a:
+- same_ids_except:
+  - sym:example.com/fx/orders.init#extra.go#0
+  - sym:example.com/fx/orders.Normalize
+- present:
+    in: both
+    id: sym:example.com/fx/orders.init#service.go#0
+tier_b:
+- added_all_in_file: orders/extra.go
+- counts:
+    removed: 0
+    renamed: 0

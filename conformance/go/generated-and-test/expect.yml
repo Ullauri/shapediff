@@ -1,0 +1,24 @@
+scenario: generated-and-test
+tier_a:
+- attr_equal:
+    in: head
+    id: sym:example.com/fx/db.(*Queries).InsertOrder
+    field: generated
+    value: true
+- attr_equal:
+    in: head
+    id: sym:example.com/fx/orders.TestValidate
+    field: test
+    value: true
+- attr_equal:
+    in: head
+    id: sym:example.com/fx/orders.Validate
+    field: test
+    value: false
+- attr_equal:
+    in: head
+    id: sym:example.com/fx/orders.Validate
+    field: generated
+    value: false
+tier_b:
+- added_contains: sym:example.com/fx/orders.TestValidateLong

@@ -1,0 +1,24 @@
+scenario: package-move
+tier_a:
+- absent:
+    in: head
+    id: pkg:example.com/fx/orders
+- present:
+    in: head
+    id: pkg:example.com/fx/ordering
+tier_b:
+- renamed:
+    from: pkg:example.com/fx/orders
+    to: pkg:example.com/fx/ordering
+    via: package
+    confidence: high
+- renamed:
+    from: sym:example.com/fx/orders.(*Service).Create
+    to: sym:example.com/fx/ordering.(*Service).Create
+    via: package
+    confidence: high
+- counts:
+    edges_added: 0
+    edges_removed: 0
+    added: 0
+    removed: 0

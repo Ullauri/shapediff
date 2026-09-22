@@ -1,0 +1,22 @@
+scenario: type-rename
+tier_a:
+- field_equal_across:
+    base: sym:example.com/fx/orders.(*Service).Create
+    head: sym:example.com/fx/orders.(*OrderService).Create
+    field: fingerprint_recv
+tier_b:
+- renamed:
+    from: sym:example.com/fx/orders.Service
+    to: sym:example.com/fx/orders.OrderService
+    via: type
+    confidence: high
+- renamed:
+    from: sym:example.com/fx/orders.(*Service).Create
+    to: sym:example.com/fx/orders.(*OrderService).Create
+    via: type
+    confidence: high
+- counts:
+    edges_added: 0
+    edges_removed: 0
+    added: 0
+    removed: 0

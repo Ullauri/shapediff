@@ -1,0 +1,19 @@
+scenario: route-rename
+tier_a:
+- present:
+    in: both
+    id: sym:example.com/fx/orders.(*Handler).Create
+- present:
+    in: head
+    id: entry:http:POST /v2/orders
+tier_b:
+- renamed:
+    from: entry:http:POST /orders
+    to: entry:http:POST /v2/orders
+    via: entrypoint
+    confidence: high
+- counts:
+    edges_added: 0
+    edges_removed: 0
+    added: 0
+    removed: 0

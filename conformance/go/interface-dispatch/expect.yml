@@ -1,0 +1,24 @@
+scenario: interface-dispatch
+tier_a:
+- edge:
+    in: base
+    from: sym:example.com/fx/orders.(*Service).Create
+    to: sym:example.com/fx/db.(*SQLStore).Insert
+    kind: calls
+    dynamic: true
+    min_targets: 1
+- edge:
+    in: head
+    from: sym:example.com/fx/orders.(*Service).Create
+    to: sym:example.com/fx/db.(*MemStore).Insert
+    kind: calls
+    dynamic: true
+    min_targets: 2
+- edge:
+    in: head
+    from: sym:example.com/fx/db.MemStore
+    to: sym:example.com/fx/orders.Store
+    kind: implements
+tier_b:
+- added_contains: sym:example.com/fx/db.(*MemStore).Insert
+- structural: true

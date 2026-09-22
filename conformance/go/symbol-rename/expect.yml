@@ -1,0 +1,21 @@
+scenario: symbol-rename
+tier_a:
+- node_count_equal: true
+- absent:
+    in: head
+    id: sym:example.com/fx/orders.Validate
+- present:
+    in: head
+    id: sym:example.com/fx/orders.ValidateName
+tier_b:
+- renamed:
+    from: sym:example.com/fx/orders.Validate
+    to: sym:example.com/fx/orders.ValidateName
+    via: fingerprint
+    confidence: high
+- counts:
+    edges_added: 0
+    edges_removed: 0
+    added: 0
+    removed: 0
+    renamed: 1

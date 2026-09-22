@@ -1,0 +1,18 @@
+scenario: literal-changed
+tier_a:
+- field_differs:
+    id: sym:example.com/fx/orders.Timeout
+    field: body_hash
+- field_equal:
+    id: sym:example.com/fx/orders.Timeout
+    field: fingerprint
+tier_b:
+- body_changed_contains: sym:example.com/fx/orders.Timeout
+- not_in:
+    list: renamed
+    id: sym:example.com/fx/orders.Timeout
+- counts:
+    added: 0
+    removed: 0
+    renamed: 0
+- structural: false

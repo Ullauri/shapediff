@@ -1,0 +1,18 @@
+scenario: entrypoint-registered
+tier_a:
+- absent:
+    in: base
+    id: entry:http:POST /orders
+- present:
+    in: head
+    id: entry:http:POST /orders
+- edge:
+    in: head
+    from: entry:http:POST /orders
+    to: sym:example.com/fx/orders.(*Handler).Create
+    kind: handles
+tier_b:
+- entrypoint:
+    id: entry:http:POST /orders
+    status: added
+- structural: true

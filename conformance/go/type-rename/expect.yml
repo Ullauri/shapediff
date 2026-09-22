@@ -20,3 +20,4 @@ tier_b:
     edges_removed: 0
     added: 0
     removed: 0
+    signature_changed: 0

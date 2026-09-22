@@ -300,7 +300,17 @@ func suppressed(d *delta.Delta) Sentence {
 // ---- helpers ----
 
 // name is the short display name of an ID, in backticks.
-func name(id string) string { return "`" + graph.ShortName(id) + "`" }
+// name renders a node for prose. Sinks carry their kind so a table named
+// like a package reads unambiguously.
+func name(id string) string {
+	if graph.IDPrefix(id) == "sink" {
+		parts := strings.SplitN(id, ":", 3)
+		if len(parts) == 3 {
+			return "`" + parts[2] + "` (" + parts[1] + " sink)"
+		}
+	}
+	return "`" + graph.ShortName(id) + "`"
+}
 
 func listNames(ids []string, max int) string {
 	ids = append([]string(nil), ids...)

@@ -16,4 +16,5 @@ tier_b:
     renamed: 0
     edges_added: 0
     edges_removed: 0
+    signature_changed: 0
 - structural: false

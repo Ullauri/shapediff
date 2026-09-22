@@ -47,7 +47,8 @@ type Extractor interface {
 }
 
 // Exe runs an external extractor: <exe> --repo <dir> --config <path>,
-// JSON on stdout, exit 0.
+// JSON on stdout, exit 0. Path may carry leading arguments ("shapediff
+// extract"), split on whitespace.
 type Exe struct{ Path string }
 
 // Name returns the executable path.
@@ -55,7 +56,12 @@ func (e Exe) Name() string { return e.Path }
 
 // Extract runs the executable and decodes its stdout.
 func (e Exe) Extract(ctx context.Context, repoDir, configPath string) (*graph.Document, error) {
-	cmd := exec.CommandContext(ctx, e.Path, "--repo", repoDir, "--config", configPath)
+	argv := strings.Fields(e.Path)
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("extractor: empty command")
+	}
+	argv = append(argv, "--repo", repoDir, "--config", configPath)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

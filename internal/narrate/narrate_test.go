@@ -85,7 +85,7 @@ func TestTemplateOrderAndClaims(t *testing.T) {
 	want := []string{
 		"`POST /orders` is added.",
 		"`Old/Do` is removed.",
-		"`GET /orders` now reaches `cache`; `GET /orders` no longer reaches `audit`; `POST /orders` now reaches `orders`.",
+		"`GET /orders` now reaches `cache`; `GET /orders` no longer reaches `audit` (queue sink); `POST /orders` now reaches `orders` (db sink).",
 		"`Target` changed signature (2 callers).",
 		"`Old` renamed to `New` (probably).",
 		"package `cache` is added.",

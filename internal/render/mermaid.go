@@ -59,7 +59,7 @@ func Mermaid(dg *filter.Diagram) string {
 		writeNode(&b, n)
 	}
 	var styles []string
-	for i, e := range dg.Edges {
+	for i, e := range drawnEdges(dg.Edges) {
 		arrow := "-->"
 		if e.Dynamic {
 			arrow = "-.->"
@@ -177,4 +177,40 @@ func sanitize(s string) string {
 		}
 	}
 	return b.String() + "_" + hash8(s)
+}
+
+// drawnEdges merges edges that would draw identically (same endpoints,
+// same dispatch and confidence): a reads and a writes edge into one sink
+// are one arrow. Status precedence: added, removed, unchanged.
+func drawnEdges(edges []filter.Edge) []filter.Edge {
+	type key struct {
+		from, to          string
+		dynamic, inferred bool
+	}
+	idx := map[key]int{}
+	var out []filter.Edge
+	rank := func(st string) int {
+		switch st {
+		case filter.EdgeAdded:
+			return 2
+		case filter.EdgeRemoved:
+			return 1
+		}
+		return 0
+	}
+	for _, e := range edges {
+		k := key{e.From, e.To, e.Dynamic, e.Inferred}
+		if i, ok := idx[k]; ok {
+			if rank(e.Status) > rank(out[i].Status) {
+				out[i].Status = e.Status
+			}
+			if e.Targets > out[i].Targets {
+				out[i].Targets = e.Targets
+			}
+			continue
+		}
+		idx[k] = len(out)
+		out = append(out, e)
+	}
+	return out
 }

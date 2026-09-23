@@ -33,4 +33,15 @@ func TestDefaultsAndHash(t *testing.T) {
 	if _, err := LoadRepo(dir); err == nil {
 		t.Error("bad narration value accepted")
 	}
+	if c.Baseline != "on" {
+		t.Errorf("baseline default = %q", c.Baseline)
+	}
+	os.WriteFile(filepath.Join(dir, FileName), []byte("baseline: off\n"), 0o644)
+	if c4, err := LoadRepo(dir); err != nil || c4.Baseline != "off" || c4.Hash() == h1 {
+		t.Errorf("baseline: off: %+v %v", c4, err)
+	}
+	os.WriteFile(filepath.Join(dir, FileName), []byte("baseline: maybe\n"), 0o644)
+	if _, err := LoadRepo(dir); err == nil {
+		t.Error("bad baseline value accepted")
+	}
 }

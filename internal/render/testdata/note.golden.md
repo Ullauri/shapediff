@@ -5,6 +5,36 @@ head does not compile: `acme/svc/broken` (2 changes hidden)
 
 `POST /orders` now reaches `orders`. `(*Service).Create` changed signature (3 callers).
 
+#### Where this lands
+
+At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external module not drawn). This MR changes code in 2 of them.
+
+| package | symbols | this MR | imported by | reached from | talks to |
+|---|---|---|---|---|---|
+| [`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders) | 12 | 1 added, 1 changed | `api`, `billing`, `cron`, `export`, +1 | `POST /orders` | `db orders` |
+| [`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util) | 3 | new package | `orders` | — | — |
+
+```mermaid
+flowchart LR
+  classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
+  classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
+  classDef touched fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#1f2937
+  n30b7924f(["2 http routes"])
+  n7309427a[["orders"]]
+  n9cc466a4[["store"]]
+  na7fef5cf[["util"]]
+  n53798808[("db")]
+  n30b7924f --> n7309427a
+  n7309427a --> n9cc466a4
+  n7309427a --> na7fef5cf
+  n9cc466a4 --> n53798808
+  linkStyle 2 stroke:#16a34a,stroke-width:2px
+  class na7fef5cf added
+  class n30b7924f,n9cc466a4,n53798808 context
+  class n7309427a touched
+```
+Legend: purple changed by this MR, green added, red dashed removed, grey untouched; rounded entry points, cylinder sinks; arrows are imports; boxes are directories. 4 untouched packages folded into their directory to fit.
+
 #### Dataflow
 
 ```mermaid

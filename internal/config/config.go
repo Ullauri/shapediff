@@ -26,7 +26,10 @@ type Config struct {
 	Budget        Budget                    `yaml:"budget"`
 	NarrowTargets int                       `yaml:"narrow_targets"`
 	Narration     string                    `yaml:"narration"`
-	LLM           LLM                       `yaml:"llm"`
+	// Baseline is the "where this lands" section of the note (spec 10.1):
+	// on (default) or off.
+	Baseline string `yaml:"baseline"`
+	LLM      LLM    `yaml:"llm"`
 }
 
 // EntryPattern is a configured entry point registration: a call to a
@@ -74,6 +77,7 @@ func base() *Config {
 		Budget:        Budget{Chars: 1800, Nodes: 24},
 		NarrowTargets: 2,
 		Narration:     "template",
+		Baseline:      "on",
 	}
 }
 
@@ -99,6 +103,13 @@ func Load(path string) (*Config, error) {
 		c.Narration = "template"
 	default:
 		return nil, fmt.Errorf("%s: narration must be template, llm or off, got %q", path, c.Narration)
+	}
+	switch c.Baseline {
+	case "on", "off":
+	case "":
+		c.Baseline = "on"
+	default:
+		return nil, fmt.Errorf("%s: baseline must be on or off, got %q", path, c.Baseline)
 	}
 	return c, nil
 }

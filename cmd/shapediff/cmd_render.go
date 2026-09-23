@@ -49,8 +49,12 @@ func renderNote(d *delta.Delta, head, base *graph.Index, cfg *config.Config, pro
 			texts = append(texts, s.Text)
 		}
 	}
+	var bl *filter.Baseline
+	if cfg.Baseline != "off" {
+		bl = filter.BaselineView(d, head, base, filter.Options{Budget: budget, Measure: func(dg *filter.Diagram) int { return len(render.Mermaid(dg)) }})
+	}
 	note, err := render.Note(render.NoteInput{
-		Delta: d, Head: head, Base: base, Filter: res,
+		Delta: d, Head: head, Base: base, Filter: res, Baseline: bl,
 		Headline: narrate.Headline(d), Suppression: narrate.SuppressionLine(d), Sentences: texts,
 		ProjectURL: projectURL, HeadSHA: d.HeadSHA, BaseSHA: d.BaseSHA, MRIID: d.MRIID,
 		Extractor: head.Doc.Extractor, Elapsed: time.Since(started),

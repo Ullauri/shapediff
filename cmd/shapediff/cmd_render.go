@@ -26,7 +26,8 @@ func init() {
 func renderNote(d *delta.Delta, head, base *graph.Index, cfg *config.Config, projectURL string, started time.Time) (string, *filter.Result, []string, error) {
 	var warnings []string
 	budget := filter.Budget{Chars: cfg.Budget.Chars, Nodes: cfg.Budget.Nodes, Edges: cfg.Budget.Edges, NarrowTargets: cfg.NarrowTargets}
-	res := filter.Apply(d, head, base, filter.Options{Budget: budget, Measure: func(dg *filter.Diagram) int { return len(render.Mermaid(dg)) }})
+	opts := filter.Options{Budget: budget, Measure: func(dg *filter.Diagram) int { return len(render.Mermaid(dg)) }}
+	res := filter.Apply(d, head, base, opts)
 
 	var texts []string
 	if cfg.Narration != "off" {
@@ -51,7 +52,7 @@ func renderNote(d *delta.Delta, head, base *graph.Index, cfg *config.Config, pro
 	}
 	var bl *filter.Baseline
 	if cfg.Baseline != "off" {
-		bl = filter.BaselineView(d, head, base, filter.Options{Budget: budget, Measure: func(dg *filter.Diagram) int { return len(render.Mermaid(dg)) }})
+		bl = filter.BaselineView(d, head, base, opts)
 	}
 	note, err := render.Note(render.NoteInput{
 		Delta: d, Head: head, Base: base, Filter: res, Baseline: bl,

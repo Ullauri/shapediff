@@ -345,13 +345,10 @@ func (b *builder) dataflow() *Diagram {
 	}
 	kept := map[string][]string{}
 	for _, ep := range b.d.Entrypoints {
-		if ep.Status == "unchanged" {
-			continue
+		if ep.Status != "unchanged" {
+			kept[ep.ID] = b.keptReach(ep)
+			b.drawKept(w, ep.ID, kept[ep.ID])
 		}
-		kept[ep.ID] = b.keptReach(ep)
-	}
-	for _, id := range eps {
-		b.drawKept(w, id, kept[id])
 	}
 	// Over budget: take the baseline back out, most items first, until it
 	// fits; the delta itself is never cut here.

@@ -146,7 +146,7 @@ func TestBaselineBudget(t *testing.T) {
 	// (c) untouched packages fold into their directory, largest first
 	c := BaselineView(d, head, base, Options{Budget: Budget{Chars: 1000, Nodes: 6, Edges: 100, NarrowTargets: 2}, Measure: measureLines})
 	more := c.Map.NodeByID("more:internal")
-	if more == nil || more.CollapsedCount != 5 || more.Group != "internal" || more.Label != "5 more packages" || c.Collapsed != 5 {
+	if more == nil || more.Kind != KindMore || more.CollapsedCount != 5 || more.Group != "internal" || more.Label != "5 more packages" || c.Collapsed != 5 {
 		t.Errorf("step c: %+v collapsed=%d nodes=%v", more, c.Collapsed, nodeIDs(c.Map))
 	}
 	if c.Map.NodeByID("pkg:acme/svc/internal/p0") == nil || c.Map.NodeByID("pkg:acme/svc/cmd/svc") == nil {
@@ -160,10 +160,63 @@ func TestBaselineBudget(t *testing.T) {
 	if dd.Map.NodeByID("pkg:acme/svc/internal/p0") == nil {
 		t.Errorf("touched package dropped: %v", nodeIDs(dd.Map))
 	}
+	// folded packages that were then hidden count once, as hidden
+	if dd.Collapsed+dd.Hidden != 7 {
+		t.Errorf("collapsed %d + hidden %d != 7 untouched packages", dd.Collapsed, dd.Hidden)
+	}
 	// determinism under the budget
 	dd2 := BaselineView(d, head, base, Options{Budget: Budget{Chars: 1000, Nodes: 3, Edges: 100, NarrowTargets: 2}, Measure: measureLines})
 	if !reflect.DeepEqual(dd, dd2) {
 		t.Error("budgeted runs differ")
+	}
+}
+
+// manyTouched is a repo of n packages, every one touched by the MR.
+func manyTouched(n int) (ix *graph.Index, d *delta.Delta) {
+	g := newGB()
+	dd := newDelta()
+	for i := 0; i < n; i++ {
+		p := fmt.Sprintf("acme/svc/p%02d", i)
+		g.pkg(p)
+		dd.Nodes.BodyChanged = append(dd.Nodes.BodyChanged, g.sym(p, "F", "func"))
+	}
+	dd.Canonicalize()
+	return g.index(), dd
+}
+
+func TestBaselineStepFKeepsTopBPlusOne(t *testing.T) {
+	ix, d := manyTouched(30)
+	bl := BaselineView(d, ix, ix, Options{Budget: Budget{Chars: 100000, Nodes: 24, Edges: 36, NarrowTargets: 2}, Measure: measureLines})
+	if bl.Map == nil || bl.MapOmitted {
+		t.Fatalf("map omitted under a generous character budget: %+v", bl)
+	}
+	if len(bl.Map.Nodes) != 25 || bl.Hidden != 6 || bl.Map.NodeByID("more:hidden").Label != "+6 packages" {
+		t.Errorf("step f: %d nodes hidden=%d %v", len(bl.Map.Nodes), bl.Hidden, nodeIDs(bl.Map))
+	}
+	// B lowers on the character budget until the source fits
+	bl = BaselineView(d, ix, ix, Options{Budget: Budget{Chars: 13, Nodes: 24, Edges: 36, NarrowTargets: 2}, Measure: measureLines})
+	if bl.Map == nil || len(bl.Map.Nodes) != 13 || bl.Hidden != 18 {
+		t.Errorf("step f lowering B: %+v nodes=%d", bl, len(bl.Map.Nodes))
+	}
+}
+
+func TestBaselineTestOnlyPackageGainingCode(t *testing.T) {
+	build := func(withCode bool) *graph.Index {
+		g := newGB().pkg("acme/svc/orders").pkg("acme/svc/x")
+		g.sym("acme/svc/orders", "Handler", "func")
+		g.testSym("acme/svc/x", "TestX")
+		if withCode {
+			g.sym("acme/svc/x", "Run", "func")
+		}
+		return g.index()
+	}
+	base, head := build(false), build(true)
+	d := newDelta()
+	d.Nodes.Added = []string{graph.SymID("acme/svc/x", "Run")}
+	d.Canonicalize()
+	bl := BaselineView(d, head, base, Options{Budget: defaultBudget()})
+	if bl.Packages != 2 || bl.External != 0 || len(bl.Touched) != 1 || bl.Touched[0].ID != "pkg:acme/svc/x" || bl.Map.NodeByID("pkg:acme/svc/x") == nil {
+		t.Errorf("package gaining its first symbol must be on the map: %+v", bl)
 	}
 }
 
@@ -187,7 +240,7 @@ func TestBaselineIgnoresTestOnlyPackages(t *testing.T) {
 	d.Nodes.Added = []string{graph.SymID("acme/svc/orders_test", "TestHandler")}
 	d.Canonicalize()
 	bl := BaselineView(d, ix, ix, Options{Budget: defaultBudget()})
-	if bl.Packages != 1 || bl.Map.NodeByID("pkg:acme/svc/orders_test") != nil || len(bl.Touched) != 0 {
+	if bl.Packages != 1 || bl.External != 0 || bl.Map.NodeByID("pkg:acme/svc/orders_test") != nil || len(bl.Touched) != 0 {
 		t.Errorf("test-only package drawn or counted: %+v nodes=%v", bl, nodeIDs(bl.Map))
 	}
 }
@@ -206,8 +259,8 @@ func TestBaselineAddedPackage(t *testing.T) {
 	d.Canonicalize()
 	bl := BaselineView(d, head, s.base, Options{Budget: defaultBudget()})
 	n := bl.Map.NodeByID("pkg:acme/svc/audit")
-	if n == nil || n.Status != StatusAdded {
-		t.Fatalf("added package = %+v", n)
+	if n == nil || n.Status != StatusAdded || bl.Packages != 2 {
+		t.Fatalf("added package = %+v, base count %d", n, bl.Packages)
 	}
 	var row *TouchedPackage
 	for i := range bl.Touched {

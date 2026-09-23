@@ -22,9 +22,9 @@ type Baseline struct {
 	Map *Diagram
 	// Touched is one row per package the MR changed inside, sorted by ID.
 	Touched []TouchedPackage
-	// Packages counts internal packages at the base (plus added ones);
-	// External counts imported modules outside the repo, which are not
-	// drawn; Entrypoints and Sinks are the base graph's counts.
+	// Packages counts internal packages at the base; External counts
+	// imported modules outside the repo, which are not drawn; Entrypoints
+	// and Sinks are the base graph's counts.
 	Packages, External, Entrypoints, Sinks int
 	// Collapsed counts untouched packages folded into a directory node to
 	// fit the budget; Hidden counts packages dropped by the terminal rule.
@@ -68,14 +68,14 @@ type TouchedPackage struct {
 func BaselineView(d *delta.Delta, head, base *graph.Index, opts Options) *Baseline {
 	b := newBuilder(d, head, base, opts)
 	m := newMapBuilder(b)
-	bl := &Baseline{Packages: len(m.internal), External: m.external, Entrypoints: m.entryCount, Sinks: m.sinkCount}
+	bl := &Baseline{Packages: m.basePackages, External: m.external, Entrypoints: m.entryCount, Sinks: m.sinkCount}
 	if len(m.internal) == 0 {
 		return bl
 	}
 	bl.Touched = m.touchedRows()
 	w := m.initial()
-	B := m.fit(w, bl)
-	if b.over(w, B) {
+	m.fit(w, bl)
+	if !m.fits(w) {
 		bl.MapOmitted = true
 		return bl
 	}
@@ -91,10 +91,17 @@ type mapBuilder struct {
 	b *builder
 	// internal is every drawn package, sorted; ix says which graph each
 	// one is read from (base, or head for an added package).
-	internal []string
-	ix       map[string]*graph.Index
-	external int
-	root     string // common import-path prefix, "" when there is none
+	internal     []string
+	ix           map[string]*graph.Index
+	basePackages int
+	external     int
+	root         string // common import-path prefix, "" when there is none
+	// nodes buckets each graph's nodes by pkg: ID, built once.
+	nodes map[*graph.Index]map[string][]*graph.Node
+	// changed is the delta's node changes per package.
+	changed map[string]pkgChanges
+	// importsAdded and importsRemoved index the delta's import changes.
+	importsAdded, importsRemoved map[delta.ImportEdge]bool
 	// imports is the package import graph among internal packages.
 	imports map[string]map[string]bool
 	// entries maps a package to the entry points registered in it; sinks
@@ -114,36 +121,55 @@ type mapBuilder struct {
 }
 
 func newMapBuilder(b *builder) *mapBuilder {
-	m := &mapBuilder{b: b, ix: map[string]*graph.Index{}, imports: map[string]map[string]bool{}, entries: map[string][]string{}, sinks: map[string]map[string]bool{}, sinkKinds: map[string]int{}, sinkNames: map[string]string{}, status: map[string]string{}, entryStatus: map[string]string{}}
+	m := &mapBuilder{b: b, ix: map[string]*graph.Index{}, imports: map[string]map[string]bool{}, entries: map[string][]string{}, sinks: map[string]map[string]bool{}, sinkKinds: map[string]int{}, sinkNames: map[string]string{}, status: map[string]string{}, entryStatus: map[string]string{},
+		nodes: map[*graph.Index]map[string][]*graph.Node{}, importsAdded: map[delta.ImportEdge]bool{}, importsRemoved: map[delta.ImportEdge]bool{}}
 	for _, ep := range b.d.Entrypoints {
 		if ep.Status == delta.EPAdded || ep.Status == delta.EPRemoved {
 			m.entryStatus[ep.ID] = ep.Status
 		}
 	}
-	// Internal packages are the ones with a non-test node under them: an
-	// external module collapses to a bare pkg: node with nothing beneath
-	// it, and a test-only package (an external test package, say) is not
-	// shape, as section 9 excludes test nodes from the focus set.
-	hasNodes := func(ix *graph.Index) map[string]bool {
-		s := map[string]bool{}
-		for _, n := range ix.Doc.Nodes {
-			if n.Kind != graph.KindPackage && n.Package != "" && !n.Attrs.Test {
-				s[graph.PkgID(n.Package)] = true
+	for _, e := range b.d.Packages.ImportsAdded {
+		m.importsAdded[e] = true
+	}
+	for _, e := range b.d.Packages.ImportsRemoved {
+		m.importsRemoved[e] = true
+	}
+	for _, ix := range []*graph.Index{b.base, b.head} {
+		byPkg := map[string][]*graph.Node{}
+		for i := range ix.Doc.Nodes {
+			n := &ix.Doc.Nodes[i]
+			if n.Kind != graph.KindPackage && n.Package != "" {
+				byPkg[graph.PkgID(n.Package)] = append(byPkg[graph.PkgID(n.Package)], n)
 			}
 		}
-		return s
+		m.nodes[ix] = byPkg
 	}
-	baseHas, headHas := hasNodes(b.base), hasNodes(b.head)
-	for _, p := range b.base.Doc.Packages {
-		if !baseHas[p.ID] {
-			m.external++
-			continue
+	// A package is internal when a non-test node lives under it, at base
+	// or at head (a base package holding only tests gains its first real
+	// symbol in the MR and must be on the map). An external module
+	// collapses to a bare pkg: node with nothing beneath it. A package
+	// with only test nodes in both graphs (an external test package) is
+	// not shape, as section 9 excludes test nodes from the focus set.
+	hasCode := func(ix *graph.Index, id string) bool {
+		for _, n := range m.nodes[ix][id] {
+			if !n.Attrs.Test {
+				return true
+			}
 		}
-		m.internal = append(m.internal, p.ID)
-		m.ix[p.ID] = b.base
+		return false
+	}
+	for _, p := range b.base.Doc.Packages {
+		switch {
+		case hasCode(b.base, p.ID) || (b.head.Packages[p.ID] != nil && hasCode(b.head, p.ID)):
+			m.internal = append(m.internal, p.ID)
+			m.ix[p.ID] = b.base
+			m.basePackages++
+		case len(m.nodes[b.base][p.ID]) == 0:
+			m.external++
+		}
 	}
 	for _, id := range b.d.Packages.Added {
-		if headHas[id] && m.ix[id] == nil {
+		if hasCode(b.head, id) && m.ix[id] == nil {
 			m.internal = append(m.internal, id)
 			m.ix[id] = b.head
 		}
@@ -180,14 +206,13 @@ func newMapBuilder(b *builder) *mapBuilder {
 	}
 	// Entry points and sinks, read from the graph each package lives in.
 	// An entry point the MR added exists only at head and is attached to
-	// its head package, so the map shows the new door.
+	// its head package, so the map shows the new door. An entry point with
+	// no recorded registration site is attached to its handler's package.
 	seenEntry, seenSink := map[string]bool{}, map[string]bool{}
 	attach := func(ix *graph.Index, n *graph.Node) {
 		if seenEntry[n.ID] {
 			return
 		}
-		// registered in this package, or (when the extractor recorded no
-		// registration site) handled by a symbol of it
 		pkg := graph.PkgID(n.Package)
 		if n.Package == "" {
 			pkg = ix.PackageOf(handlerOf(ix, n.ID))
@@ -198,28 +223,21 @@ func newMapBuilder(b *builder) *mapBuilder {
 		seenEntry[n.ID] = true
 		m.entries[pkg] = append(m.entries[pkg], n.ID)
 	}
-	for _, id := range m.internal {
-		ix := m.ix[id]
+	for _, ix := range []*graph.Index{b.base, b.head} {
 		for i := range ix.Doc.Nodes {
 			n := &ix.Doc.Nodes[i]
-			if n.Kind == graph.KindEntrypoint && (graph.PkgID(n.Package) == id || (n.Package == "" && ix.PackageOf(handlerOf(ix, n.ID)) == id)) {
+			if n.Kind != graph.KindEntrypoint {
+				continue
+			}
+			if ix == b.base || m.entryStatus[n.ID] == delta.EPAdded {
 				attach(ix, n)
 			}
-		}
-	}
-	for i := range b.head.Doc.Nodes {
-		n := &b.head.Doc.Nodes[i]
-		if n.Kind == graph.KindEntrypoint && m.entryStatus[n.ID] == delta.EPAdded {
-			attach(b.head, n)
 		}
 	}
 	for _, id := range m.internal {
 		ix := m.ix[id]
 		sort.Strings(m.entries[id])
-		for _, n := range ix.Doc.Nodes {
-			if n.Kind == graph.KindPackage || graph.PkgID(n.Package) != id {
-				continue
-			}
+		for _, n := range m.nodes[ix][id] {
 			for _, e := range ix.Out[n.ID] {
 				if graph.IDPrefix(e.To) != "sink" {
 					continue
@@ -230,12 +248,13 @@ func newMapBuilder(b *builder) *mapBuilder {
 				m.sinks[id][e.To] = true
 				if !seenSink[e.To] {
 					seenSink[e.To] = true
-					m.sinkKinds[sinkKind(e.To)]++
-					m.sinkNames[sinkKind(e.To)] = graph.ShortName(e.To)
+					m.sinkKinds[idKind(e.To)]++
+					m.sinkNames[idKind(e.To)] = graph.ShortName(e.To)
 				}
 			}
 		}
 	}
+	m.changed = m.changedPerPackage()
 	for id := range seenEntry {
 		if m.entryStatus[id] != delta.EPAdded {
 			m.entryCount++
@@ -318,7 +337,8 @@ func handlerOf(ix *graph.Index, entry string) string {
 	return entry
 }
 
-func sinkKind(id string) string {
+// idKind is the kind field of an entry: or sink: ID (section 6.1).
+func idKind(id string) string {
 	parts := strings.SplitN(id, ":", 3)
 	if len(parts) == 3 {
 		return parts[1]
@@ -375,19 +395,15 @@ func (m *mapBuilder) touchedRows() []TouchedPackage {
 		reachedBy[ix] = r
 		return r
 	}
-	changed := m.changedPerPackage()
 	for _, id := range m.internal {
 		st := m.status[id]
 		if st == StatusContext {
 			continue
 		}
 		ix := m.ix[id]
-		pc := changed[id]
+		pc := m.changed[id]
 		row := TouchedPackage{ID: id, Label: m.label(id), Status: st, Added: pc.added, Removed: pc.removed, Changed: pc.changed, Renamed: pc.renamed}
-		for _, n := range ix.Doc.Nodes {
-			if n.Kind == graph.KindPackage || graph.PkgID(n.Package) != id {
-				continue
-			}
+		for _, n := range m.nodes[ix][id] {
 			if n.Kind == graph.KindSymbol {
 				row.Symbols++
 			}
@@ -489,7 +505,7 @@ func (m *mapBuilder) initial() *work {
 				w.edges[edgeKey{en, id, graph.EdgeHandles}] = &Edge{From: en, To: id, Kind: graph.EdgeHandles, Status: st}
 				continue
 			}
-			byKind[entryKind(en)] = append(byKind[entryKind(en)], en)
+			byKind[idKind(en)] = append(byKind[idKind(en)], en)
 		}
 		kinds := make([]string, 0, len(byKind))
 		for k := range byKind {
@@ -513,7 +529,7 @@ func (m *mapBuilder) initial() *work {
 		kinds = kinds[:0]
 		seen := map[string]bool{}
 		for s := range m.sinks[id] {
-			if k := sinkKind(s); !seen[k] {
+			if k := idKind(s); !seen[k] {
 				seen[k] = true
 				kinds = append(kinds, k)
 			}
@@ -535,24 +551,12 @@ func (m *mapBuilder) initial() *work {
 	return w
 }
 
-func entryKind(id string) string {
-	parts := strings.SplitN(id, ":", 3)
-	if len(parts) == 3 {
-		return parts[1]
-	}
-	return id
-}
-
 func (m *mapBuilder) importStatus(from, to string) string {
-	for _, e := range m.b.d.Packages.ImportsAdded {
-		if e.From == from && e.To == to {
-			return EdgeAdded
-		}
-	}
-	for _, e := range m.b.d.Packages.ImportsRemoved {
-		if e.From == from && e.To == to {
-			return EdgeRemoved
-		}
+	switch e := (delta.ImportEdge{From: from, To: to}); {
+	case m.importsAdded[e]:
+		return EdgeAdded
+	case m.importsRemoved[e]:
+		return EdgeRemoved
 	}
 	return EdgeUnchanged
 }
@@ -570,14 +574,15 @@ func (m *mapBuilder) isTouched(id string) bool {
 // and their direct neighbours only, with a "+N packages" node; (e) keep
 // the touched packages only; (f) keep the top-B touched packages by
 // changed-symbol count. Step f always terminates the loop.
-// It returns the node cap it ended with, so the caller can tell whether
-// the map fits.
-func (m *mapBuilder) fit(w *work, bl *Baseline) (B int) {
+// Step f keeps top-B packages plus the "+N packages" node, as section 9
+// step 4f does, and lowers B on the character budget alone; fits says
+// whether the result may be drawn.
+func (m *mapBuilder) fit(w *work, bl *Baseline) {
 	b := m.b
-	B = b.opts.Budget.Nodes
+	B := b.opts.Budget.Nodes
 	over := func() bool { return b.over(w, B) }
 	if !over() {
-		return B
+		return
 	}
 	// (a) import edges between untouched packages
 	for _, k := range w.sortedEdgeKeys() {
@@ -586,7 +591,7 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) (B int) {
 		}
 	}
 	if !over() {
-		return B
+		return
 	}
 	// (b) entry and sink edges on untouched packages
 	for _, k := range w.sortedEdgeKeys() {
@@ -603,13 +608,13 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) (B int) {
 	}
 	m.dropOrphanEnds(w)
 	if !over() {
-		return B
+		return
 	}
 	// (c) fold untouched packages per directory, largest directory first
 	for over() {
 		groups := map[string][]string{}
 		for id, n := range w.nodes {
-			if n.Kind == KindPackage && !m.isTouched(id) && !strings.HasPrefix(id, "more:") {
+			if n.Kind == KindPackage && !m.isTouched(id) {
 				groups[n.Group] = append(groups[n.Group], id)
 			}
 		}
@@ -625,10 +630,7 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) (B int) {
 		ids := groups[best]
 		sort.Strings(ids)
 		gid := "more:" + best
-		gn := &Node{ID: gid, Kind: KindPackage, Label: fmt.Sprintf("%d more packages", len(ids)), Status: StatusContext, Group: best, priority: prioContext, CollapsedCount: len(ids)}
-		if best == "" {
-			gn.Label = fmt.Sprintf("%d more packages", len(ids))
-		}
+		gn := &Node{ID: gid, Kind: KindMore, Label: fmt.Sprintf("%d more packages", len(ids)), Status: StatusContext, Group: best, priority: prioContext, CollapsedCount: len(ids)}
 		w.nodes[gid] = gn
 		w.context[gid] = true
 		for _, id := range ids {
@@ -639,7 +641,7 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) (B int) {
 		}
 	}
 	if !over() {
-		return B
+		return
 	}
 	// (d) touched packages and their direct neighbours
 	keep := map[string]bool{}
@@ -655,7 +657,7 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) (B int) {
 	}
 	m.keepOnly(w, keep, bl)
 	if !over() {
-		return B
+		return
 	}
 	// (e) touched packages only
 	keep = map[string]bool{}
@@ -665,9 +667,9 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) (B int) {
 		}
 	}
 	m.keepOnly(w, keep, bl)
-	// (f) top-B touched packages by changed count, then by ID
-	changed := m.changedPerPackage()
-	for over() && B > terminalFloor {
+	// (f) top-B touched packages by changed count, then by ID, plus the
+	// "+N packages" node; B drops while the source is still over S
+	for B >= terminalFloor {
 		var ids []string
 		for id := range w.nodes {
 			if m.isTouched(id) {
@@ -675,22 +677,34 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) (B int) {
 			}
 		}
 		sort.Slice(ids, func(i, j int) bool {
-			if a, b := changed[ids[i]].total(), changed[ids[j]].total(); a != b {
+			if a, b := m.changed[ids[i]].total(), m.changed[ids[j]].total(); a != b {
 				return a > b
 			}
 			return ids[i] < ids[j]
 		})
-		if len(ids) <= B {
-			B -= terminalStep
-			continue
+		if len(ids) > B {
+			keep = map[string]bool{}
+			for _, id := range ids[:B] {
+				keep[id] = true
+			}
+			m.keepOnly(w, keep, bl)
 		}
-		keep = map[string]bool{}
-		for _, id := range ids[:B] {
-			keep[id] = true
+		if m.fits(w) {
+			return
 		}
-		m.keepOnly(w, keep, bl)
+		B -= terminalStep
 	}
-	return B
+}
+
+// fits is the budget minus the node cap: the character budget and the
+// edge cap. Step f's "+N packages" node sits beside the top-B, exactly as
+// section 9 step 4f's "+N more" does, so the node count is B plus one.
+func (m *mapBuilder) fits(w *work) bool {
+	bud := m.b.opts.Budget
+	if len(w.edges) > bud.Edges {
+		return false
+	}
+	return bud.Chars <= 0 || m.b.measure(w) <= bud.Chars
 }
 
 // dropOrphanEnds removes entry and sink nodes with no remaining edge.
@@ -718,12 +732,14 @@ func (m *mapBuilder) keepOnly(w *work, keep map[string]bool, bl *Baseline) {
 			continue
 		}
 		n := w.nodes[id]
-		if n.Kind == KindPackage {
-			if n.CollapsedCount > 0 {
-				hidden += n.CollapsedCount
-			} else {
-				hidden++
-			}
+		switch {
+		case n.Kind == KindPackage:
+			hidden++
+		case n.Kind == KindMore && n.CollapsedCount > 0:
+			// a directory fold that is now dropped: its packages are
+			// hidden, not folded
+			hidden += n.CollapsedCount
+			bl.Collapsed -= n.CollapsedCount
 		}
 		delete(w.nodes, id)
 		delete(w.context, id)

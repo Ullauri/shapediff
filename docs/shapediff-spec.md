@@ -816,8 +816,11 @@ packages of one directory into a "N more packages" node in that box,
 largest directory first, repeated; (d) keep the touched packages and their
 direct neighbours, the rest as one "+N packages" node; (e) keep the
 touched packages only; (f) keep the top-`B` touched packages by count of
-changed symbols, lowering `B` as section 9 step 4f does. Step f always
-terminates. What was folded or hidden is said under the legend. The
+changed symbols plus the "+N packages" node (`B` plus one, as step 4f's
+"+N more" is), lowering `B` while the source is still over `S`. Step f
+always terminates; if the source is over `S` even at the floor, the table
+stands and the map is omitted with one line saying so. What was folded or
+hidden is said under the legend, each package counted once. The
 reasoning for the order: a package as a node with no edges is still a
 place on the map; an edge between two untouched packages is the first
 thing a reader placing a change can do without.

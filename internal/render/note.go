@@ -164,12 +164,15 @@ func writeBaseline(b *strings.Builder, in NoteInput) {
 	b.WriteString("\n")
 	fence(b, Mermaid(bl.Map))
 	b.WriteString(BaselineLegend)
-	if bl.Collapsed+bl.Hidden > 0 {
-		fmt.Fprintf(b, " %d untouched %s folded into their directory", bl.Collapsed, plural(bl.Collapsed, "package", "packages"))
-		if bl.Hidden > 0 {
-			fmt.Fprintf(b, " and %d hidden", bl.Hidden)
-		}
-		b.WriteString(" to fit.")
+	var cut []string
+	if bl.Collapsed > 0 {
+		cut = append(cut, fmt.Sprintf("%d untouched %s folded into their directory", bl.Collapsed, plural(bl.Collapsed, "package", "packages")))
+	}
+	if bl.Hidden > 0 {
+		cut = append(cut, fmt.Sprintf("%d %s hidden", bl.Hidden, plural(bl.Hidden, "package", "packages")))
+	}
+	if len(cut) > 0 {
+		b.WriteString(" " + strings.Join(cut, " and ") + " to fit.")
 	}
 	b.WriteString("\n")
 }

@@ -167,6 +167,31 @@ func TestBaselineBudget(t *testing.T) {
 	}
 }
 
+func TestBaselineMapOmittedWhenNothingFits(t *testing.T) {
+	head, base, touched := wideScenario(4)
+	d := newDelta()
+	d.Nodes.BodyChanged = []string{touched}
+	d.Canonicalize()
+	bl := BaselineView(d, head, base, Options{Budget: Budget{Chars: 1, Nodes: 24, Edges: 36, NarrowTargets: 2}, Measure: func(*Diagram) int { return 1000 }})
+	if bl.Map != nil || !bl.MapOmitted || len(bl.Touched) != 1 || bl.Packages != 6 {
+		t.Errorf("map should be omitted and the rows kept: %+v", bl)
+	}
+}
+
+func TestBaselineIgnoresTestOnlyPackages(t *testing.T) {
+	g := newGB().pkg("acme/svc/orders").pkg("acme/svc/orders_test").imports("acme/svc/orders_test", "acme/svc/orders")
+	g.sym("acme/svc/orders", "Handler", "func")
+	g.testSym("acme/svc/orders_test", "TestHandler")
+	ix := g.index()
+	d := newDelta()
+	d.Nodes.Added = []string{graph.SymID("acme/svc/orders_test", "TestHandler")}
+	d.Canonicalize()
+	bl := BaselineView(d, ix, ix, Options{Budget: defaultBudget()})
+	if bl.Packages != 1 || bl.Map.NodeByID("pkg:acme/svc/orders_test") != nil || len(bl.Touched) != 0 {
+		t.Errorf("test-only package drawn or counted: %+v nodes=%v", bl, nodeIDs(bl.Map))
+	}
+}
+
 func TestBaselineAddedPackage(t *testing.T) {
 	s := basicScenario()
 	hb := newGB().pkg("acme/svc/orders").pkg("acme/svc/store").pkg("acme/svc/audit").imports("acme/svc/orders", "acme/svc/store").imports("acme/svc/orders", "acme/svc/audit")

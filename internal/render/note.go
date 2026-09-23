@@ -57,7 +57,7 @@ func Note(in NoteInput) (string, error) {
 	if len(in.Sentences) > 0 {
 		b.WriteString("\n" + strings.Join(in.Sentences, " ") + "\n")
 	}
-	if in.Baseline != nil && in.Baseline.Map != nil {
+	if in.Baseline != nil && in.Baseline.Packages > 0 {
 		writeBaseline(&b, in)
 	}
 	if in.Filter.Dataflow != nil {
@@ -154,6 +154,12 @@ func writeBaseline(b *strings.Builder, in NoteInput) {
 			}
 			fmt.Fprintf(b, "| %s | %d | %s | %s | %s | %s |\n", name, t.Symbols, strings.Join(did, ", "), shortList(t.ImportedBy, 4), shortList(t.Entrypoints, 4), shortList(t.Sinks, 4))
 		}
+	}
+	if bl.Map == nil {
+		if bl.MapOmitted {
+			b.WriteString("\nThe package map exceeds the Mermaid size limit for this instance even at its smallest; not drawn.\n")
+		}
+		return
 	}
 	b.WriteString("\n")
 	fence(b, Mermaid(bl.Map))

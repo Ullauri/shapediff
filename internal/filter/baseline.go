@@ -29,6 +29,10 @@ type Baseline struct {
 	// Collapsed counts untouched packages folded into a directory node to
 	// fit the budget; Hidden counts packages dropped by the terminal rule.
 	Collapsed, Hidden int
+	// MapOmitted is set when even the terminal rule could not bring the
+	// map under the character budget (long labels); Map is then nil and
+	// the table stands alone.
+	MapOmitted bool
 }
 
 // TouchedPackage is what a reader needs to know about one package the MR
@@ -70,7 +74,11 @@ func BaselineView(d *delta.Delta, head, base *graph.Index, opts Options) *Baseli
 	}
 	bl.Touched = m.touchedRows()
 	w := m.initial()
-	m.fit(w, bl)
+	B := m.fit(w, bl)
+	if b.over(w, B) {
+		bl.MapOmitted = true
+		return bl
+	}
 	bl.Map = w.diagram()
 	bl.Map.Title = "where this lands"
 	bl.Map.Subgraphs = []string{}
@@ -112,12 +120,14 @@ func newMapBuilder(b *builder) *mapBuilder {
 			m.entryStatus[ep.ID] = ep.Status
 		}
 	}
-	// Internal packages are the ones with a node under them; an external
-	// module collapses to a bare pkg: node with nothing beneath it.
+	// Internal packages are the ones with a non-test node under them: an
+	// external module collapses to a bare pkg: node with nothing beneath
+	// it, and a test-only package (an external test package, say) is not
+	// shape, as section 9 excludes test nodes from the focus set.
 	hasNodes := func(ix *graph.Index) map[string]bool {
 		s := map[string]bool{}
 		for _, n := range ix.Doc.Nodes {
-			if n.Kind != graph.KindPackage && n.Package != "" {
+			if n.Kind != graph.KindPackage && n.Package != "" && !n.Attrs.Test {
 				s[graph.PkgID(n.Package)] = true
 			}
 		}
@@ -560,12 +570,14 @@ func (m *mapBuilder) isTouched(id string) bool {
 // and their direct neighbours only, with a "+N packages" node; (e) keep
 // the touched packages only; (f) keep the top-B touched packages by
 // changed-symbol count. Step f always terminates the loop.
-func (m *mapBuilder) fit(w *work, bl *Baseline) {
+// It returns the node cap it ended with, so the caller can tell whether
+// the map fits.
+func (m *mapBuilder) fit(w *work, bl *Baseline) (B int) {
 	b := m.b
-	B := b.opts.Budget.Nodes
+	B = b.opts.Budget.Nodes
 	over := func() bool { return b.over(w, B) }
 	if !over() {
-		return
+		return B
 	}
 	// (a) import edges between untouched packages
 	for _, k := range w.sortedEdgeKeys() {
@@ -574,7 +586,7 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) {
 		}
 	}
 	if !over() {
-		return
+		return B
 	}
 	// (b) entry and sink edges on untouched packages
 	for _, k := range w.sortedEdgeKeys() {
@@ -591,7 +603,7 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) {
 	}
 	m.dropOrphanEnds(w)
 	if !over() {
-		return
+		return B
 	}
 	// (c) fold untouched packages per directory, largest directory first
 	for over() {
@@ -627,7 +639,7 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) {
 		}
 	}
 	if !over() {
-		return
+		return B
 	}
 	// (d) touched packages and their direct neighbours
 	keep := map[string]bool{}
@@ -643,7 +655,7 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) {
 	}
 	m.keepOnly(w, keep, bl)
 	if !over() {
-		return
+		return B
 	}
 	// (e) touched packages only
 	keep = map[string]bool{}
@@ -678,6 +690,7 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) {
 		}
 		m.keepOnly(w, keep, bl)
 	}
+	return B
 }
 
 // dropOrphanEnds removes entry and sink nodes with no remaining edge.

@@ -2,11 +2,10 @@
 
 Status: proposal, v0.5, 2026-09-24. Working name only. v0.1 (2026-09-20) is
 kept beside this file as `shapediff-spec.v0.1.md`; section 20 lists what
-changed and why, and what v0.3 and v0.5 added on top. v0.5 is written on
-top of v0.4 to v0.4.2, which are on the unmerged branches
-`agent/baseline-view` (section 10.1) and `agent/diagram-legibility` (the
-catching-up reader of section 2, `weekly --repo`); it cites those and does
-not restate them.
+changed and why, and what v0.3, v0.4 and v0.5 added on top. v0.5 is written
+on top of v0.4.1 and v0.4.2, which are on the unmerged branch
+`agent/diagram-legibility` (the catching-up reader of section 2, `weekly
+--repo`); it cites those and does not restate them.
 
 This document is written to be reviewed. Every section that makes a design
 choice says what the alternative was and why it lost. Sections marked
@@ -773,6 +772,79 @@ the stored layout, or any stored package was deleted, re-layout from
 scratch and bump the layout file's version so the reset is visible in the
 page ("layout reset this week").
 
+### 10.1 The baseline view ("Where this lands")
+
+Section 9 cuts the picture to the change and one hop around it, which is
+right for a reviewer who carries the repo in their head and wrong for
+anyone who does not: the delta floats with nothing to anchor it. The
+**third reader** this section serves is a person with no context on the
+repo, who needs to see the whole shape once and the change placed on it.
+The base graph already is that shape, extracted whole and cached per SHA
+(section 14.1); this section is the rendering that was missing, and adds
+no extraction, no state and no cache entry.
+
+The section sits in the note between the narration and the dataflow
+diagram (section 14.1), and has three parts, all read from the base graph
+(the head graph only for a package the MR added):
+
+1. **One sentence of size**: packages, entry points and sinks at the base
+   SHA, and how many external modules are not drawn, then how many
+   packages the MR changes code in. The base SHA is printed: it is the
+   identity of the baseline.
+2. **One table row per touched package** (section 9's definition):
+   symbol count at the base; what the MR did there (added, removed,
+   changed, renamed counts, or "new package" / "removed"); which internal
+   packages import it (the blast radius); which entry points reach it
+   narrowly (section 7.4) or are registered in it; which sinks its symbols
+   read or write. Lists are cut at four names plus "+N". Each package
+   links to its directory tree at the base SHA.
+3. **The package map**: every internal package as a node, boxed by
+   directory (the parent path relative to the packages' common root),
+   import edges among them, one node per (package, entry kind) labelled
+   with the count ("12 http routes", or the one name), one node per sink
+   kind. Touched packages are highlighted (purple, a colour the other
+   diagrams do not use), added packages green, removed red dashed, added
+   and removed entry points drawn singly in their colour, added and
+   removed imports coloured likewise. External modules are not drawn.
+
+The map is Mermaid under the same `S`, `B`, `E` budget as every other
+diagram, and is cut deterministically, ties by ID, in this order, each
+step only while still over budget: (a) drop import edges between two
+untouched packages; (b) drop entry and sink edges on untouched packages
+and any entry or sink node left without an edge; (c) fold the untouched
+packages of one directory into a "N more packages" node in that box,
+largest directory first, repeated; (d) keep the touched packages and their
+direct neighbours, the rest as one "+N packages" node; (e) keep the
+touched packages only; (f) keep the top-`B` touched packages by count of
+changed symbols, lowering `B` as section 9 step 4f does. Step f always
+terminates. What was folded or hidden is said under the legend. The
+reasoning for the order: a package as a node with no edges is still a
+place on the map; an edge between two untouched packages is the first
+thing a reader placing a change can do without.
+
+Two things this deliberately is not. It is not the weekly pinned layout:
+Mermaid cannot pin positions, so the map is not stable across MRs the way
+the weekly diagram is; boxing by directory gives the reader a stable
+frame instead, and pinned positions would need an SVG attachment (section
+10's fallback path), which is not built. And it is not a second call-path
+diagram: symbols are never drawn here.
+
+**Baseline on the dataflow diagram.** The same reader is served by section
+9 step 5 drawing, beside each changed entry point's `reach_added` and
+`reach_removed`, what that entry point still reaches: its narrow reach at
+head (base for a removed entry point) minus what the delta already
+reports, minus suppressed packages, in grey, up to six items with sinks
+first and the rest as a "+N more" badge. For an added entry point the
+whole reach is drawn green and for a removed one red, because to the
+reader all of it is new or gone. The delta is never cut to make room: if
+the kept reach puts the diagram over budget it is taken back out, entry
+point by entry point, most items first, until the diagram fits. "Now also
+reaches `queue`" reads differently next to "and still reaches `db`", and
+an added endpoint with no reach drawn was the least legible row in the
+old note.
+
+`baseline: off` in the repo configuration (section 13) removes the section.
+
 ### 10.2 The period map
 
 The reader is section 2's catching-up reader at a longer range: someone
@@ -1007,6 +1079,7 @@ budget:
   edges: 36                     # E
 narrow_targets: 2               # k, section 7.4
 narration: template             # template | llm | off
+baseline: on                    # on | off; the "Where this lands" section, 10.1
 ```
 
 The loaded config, with defaults applied, is hashed into
@@ -1070,7 +1143,12 @@ Note layout, top to bottom:
   signature changed (4 callers), 0 packages added.` Followed, when
   applicable, by the suppression line from section 8.4.
 - Narration, up to eight sentences.
-- Dataflow diagram (if any entrypoint changed).
+- "Where this lands" (section 10.1): the size line, the touched-package
+  table and the package map. Before the diagrams, because it is the frame
+  they are read in; after the narration, because the reviewer who knows
+  the repo reads the summary first and skips the frame.
+- Dataflow diagram (if any entrypoint changed), with the kept reach in
+  grey (section 10.1).
 - Call-path diagram.
 - Module wiring diagram (if any).
 - `<details>`: full node table with permalinks, renames, body-only changes,
@@ -1338,6 +1416,27 @@ to archify.
 - **Section 13: `components:`**, the first key outside
   `extractor.config_hash`, and why.
 - Sections 15 (phase 5b), 16, 17 and 19 updated to match.
+
+### Added in v0.4 (owner's request, 2026-09-22)
+
+- **Section 10.1, the baseline view.** The ask: snapshot the whole repo
+  and show the last baseline under the diff, so a reader who is not an
+  expert on the repo can place the change. The snapshot already existed
+  (the base graph, whole and cached per SHA); what did not was a rendering
+  of it. Added: a "Where this lands" section in the note (size line,
+  touched-package table with blast radius, entry points and sinks, and a
+  directory-boxed package map with the MR's footprint marked), and the
+  kept reach drawn beside the delta on the dataflow diagram. Both under
+  the existing budget, both deterministic, both `baseline: off`-able.
+  Section 2 gains this third reader implicitly; the phase 3 metric is
+  unchanged and still measures the reviewer. Not done, and said so in
+  10.1: pinned positions for the map (needs the SVG attachment path, not
+  built) and any periodic repo-wide snapshot beyond the per-MR base SHA
+  (that is the weekly cadence, section 14.2).
+- **Mermaid preamble trimmed** (section 10): the `classDef` lines are
+  emitted only for the classes a diagram uses. Six lines cost about a
+  quarter of the default `S` on every diagram, whether or not a class
+  appeared.
 
 ### Added in v0.3.1 (implementation, 2026-09-21)
 

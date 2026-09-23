@@ -4,7 +4,7 @@ Structural change legibility for GitLab merge requests. Extracts a typed
 code graph at an MR's base and head, subtracts them, filters the delta to a
 budget, renders Mermaid into one MR note, and (weekly) rolls a repo's drift
 up into a wiki page. This is the implementation of `shapediff-spec.md`
-v0.3, which sits beside this directory.
+v0.4, kept under `docs/`.
 
 ## Build and test
 
@@ -71,6 +71,7 @@ project. Both files document their variables.
 | 8.3 weekly delta and attribution | `internal/weekly` | joins cached per-MR deltas; MR list from the merge requests API |
 | 9 filtering | `internal/filter` | steps 1 to 6 as written, every tie by ID |
 | 10 rendering | `internal/render` | Mermaid, note assembly, graphviz dot fallback |
+| 10.1 baseline view | `internal/filter` `BaselineView`, `internal/render` `writeBaseline` | the package map and touched-package table; the kept reach on the dataflow diagram is in `internal/filter` `dataflow` |
 | 10 weekly pinned layout | `internal/weekly` `Layout` | `pin=true`, `notranslate`, reset policy |
 | 11 narration | `internal/narrate` | template, claim validator, optional OpenAI-compatible rewrite |
 | 13 configuration | `internal/config` | defaults, `config_hash` |
@@ -119,6 +120,14 @@ project. Both files document their variables.
   as: a package with a collapsed node draws its remaining symbols bare.
   Mermaid identifiers are short hashes rather than sanitized names, so IDs
   do not eat the character budget; labels carry the names.
+- **Baseline map (10.1).** A package is internal when a node lives under
+  it; an external module collapses to a bare `pkg:` node and is counted,
+  not drawn. Packages are boxed by parent directory relative to the common
+  import-path root, so `internal/graph` and `cmd/graph` are `graph` in two
+  boxes. An entry point with no recorded registration site is attached to
+  its handler's package. "Reached from" in the table is narrow reach plus
+  registration. The map uses a seventh colour (purple, `touched`) so it
+  never reads as a signature change.
 - **Package registry cache** uses one package name (`shapediff`) with the
   cache key as the version, since the key already embeds the repo.
 - **Weekly page, known cosmetic defect:** the "Where change concentrated"
@@ -142,6 +151,9 @@ project. Both files document their variables.
   registry are.
 - **Weekly SVG upload**: the page links the SVG the layout step wrote; the
   wiki attachment upload is not in the client.
+- **Pinned positions for the baseline map** (10.1) are not built: Mermaid
+  cannot pin, the map is boxed by directory instead, and a pinned map
+  would need the MR attachment upload, which is the seam above.
 
 ## Phase gates this build meets
 

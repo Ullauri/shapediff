@@ -346,8 +346,24 @@ func TestBodyChangedBadgeOnRoute(t *testing.T) {
 	if !has(&dg, s.entry) {
 		t.Error("entrypoint on route must be drawn")
 	}
-	if res.Dataflow == nil || len(res.Dataflow.Edges) != 1 || res.Dataflow.Edges[0].Status != EdgeAdded {
+	// the added reach is drawn green; what the entry point kept reaching
+	// (store and its table) is drawn grey beside it (spec 10.1)
+	var added, kept []string
+	for _, e := range res.Dataflow.Edges {
+		switch e.Status {
+		case EdgeAdded:
+			added = append(added, e.To)
+		case EdgeUnchanged:
+			kept = append(kept, e.To)
+		}
+	}
+	if !reflect.DeepEqual(added, []string{"pkg:acme/svc/orders"}) || !reflect.DeepEqual(kept, []string{"pkg:acme/svc/store", "sink:db:store"}) {
 		t.Errorf("dataflow = %+v", res.Dataflow)
+	}
+	// over budget, the kept reach goes first and the delta stays
+	res = Apply(d, s.head, s.base, Options{Budget: Budget{Chars: 1, Nodes: 2, Edges: 1, NarrowTargets: 2}})
+	if res.Dataflow == nil || len(res.Dataflow.Edges) != 1 || res.Dataflow.Edges[0].Status != EdgeAdded || len(res.Dataflow.Nodes) != 2 {
+		t.Errorf("dataflow over budget = %+v", res.Dataflow)
 	}
 }
 

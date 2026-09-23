@@ -3,7 +3,9 @@ package filter
 import (
 	"fmt"
 	"sort"
+	"strings"
 
+	"github.com/Ullauri/shapediff/internal/delta"
 	"github.com/Ullauri/shapediff/internal/graph"
 )
 
@@ -302,15 +304,23 @@ func (b *builder) commit(w, t *work) {
 // ---- steps 5 and 6 ----
 
 // dataflow is step 5: one row per changed entrypoint, reach_added and
-// reach_removed at package-and-sink granularity.
+// reach_removed at package-and-sink granularity. Spec 10.1 adds the
+// baseline on top: what the entry point reached before and still reaches
+// is drawn in grey (up to maxKeptReach items, sinks first, the rest as a
+// badge), so an added sink reads as "now also queue" and an added entry
+// point shows where it goes. The kept reach is dropped again, entry point
+// by entry point, if it puts the diagram over budget: the change is the
+// subject and the baseline is the context.
 func (b *builder) dataflow() *Diagram {
 	w := b.newWork("dataflow")
 	any := false
+	var eps []string
 	for _, ep := range b.d.Entrypoints {
 		if ep.Status == "unchanged" {
 			continue
 		}
 		any = true
+		eps = append(eps, ep.ID)
 		en := w.addGraphNode(ep.ID)
 		en.Kind = KindEntrypoint
 		switch ep.Status {
@@ -333,9 +343,122 @@ func (b *builder) dataflow() *Diagram {
 	if !any {
 		return nil
 	}
+	kept := map[string][]string{}
+	for _, ep := range b.d.Entrypoints {
+		if ep.Status == "unchanged" {
+			continue
+		}
+		kept[ep.ID] = b.keptReach(ep)
+	}
+	for _, id := range eps {
+		b.drawKept(w, id, kept[id])
+	}
+	// Over budget: take the baseline back out, most items first, until it
+	// fits; the delta itself is never cut here.
+	for b.over(w, b.opts.Budget.Nodes) {
+		worst, n := "", 0
+		for _, id := range eps {
+			if len(kept[id]) > n {
+				worst, n = id, len(kept[id])
+			}
+		}
+		if n == 0 {
+			break
+		}
+		b.undrawKept(w, worst, kept[worst])
+		kept[worst] = nil
+	}
 	dg := w.diagram()
 	dg.Subgraphs = []string{} // package-level view: no boxes
 	return dg
+}
+
+// maxKeptReach caps the unchanged reach drawn per entry point.
+const maxKeptReach = 6
+
+// keptReach is what an entry point reaches (narrowly, spec 7.4) in the
+// graph it exists in at head (base for a removed one), minus what the
+// delta already reports as added or removed and minus suppressed
+// packages: the part of the baseline that is still true. Sorted sinks
+// first, then packages, ties by ID.
+func (b *builder) keptReach(ep delta.Entrypoint) []string {
+	ix := b.head
+	if ep.Status == "removed" {
+		ix = b.base
+	}
+	suppressed := map[string]bool{}
+	for _, s := range b.d.Suppressed {
+		suppressed[s.Package] = true
+	}
+	ok := func(id string) bool {
+		p := ix.PackageOf(id)
+		return p == "" || !suppressed[p]
+	}
+	reported := set(append(append([]string{}, ep.ReachAdded...), ep.ReachRemoved...))
+	var items []string
+	for item, width := range delta.Reach(ix, handlerOf(ix, ep.ID), ok) {
+		if width > b.opts.Budget.NarrowTargets || reported[item] {
+			continue
+		}
+		if pfx := graph.IDPrefix(item); pfx != "pkg" && pfx != "sink" {
+			continue
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		si, sj := graph.IDPrefix(items[i]) == "sink", graph.IDPrefix(items[j]) == "sink"
+		if si != sj {
+			return si
+		}
+		return items[i] < items[j]
+	})
+	return items
+}
+
+func (b *builder) drawKept(w *work, ep string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	// what an added entry point reaches is all new to the reader, and what
+	// a removed one reached is all gone; only a surviving entry point has
+	// a baseline to keep in grey
+	status := EdgeUnchanged
+	switch w.nodes[ep].Status {
+	case StatusAdded:
+		status = EdgeAdded
+	case StatusRemoved:
+		status = EdgeRemoved
+	}
+	shown := items
+	if len(shown) > maxKeptReach {
+		shown = shown[:maxKeptReach]
+		w.nodes[ep].Badges = append(w.nodes[ep].Badges, fmt.Sprintf("+%d more", len(items)-maxKeptReach))
+	}
+	for _, item := range shown {
+		b.reachNode(w, item)
+		w.context[item] = true
+		w.edges[edgeKey{ep, item, "reaches"}] = &Edge{From: ep, To: item, Kind: "reaches", Status: status}
+	}
+}
+
+func (b *builder) undrawKept(w *work, ep string, items []string) {
+	for _, item := range items {
+		delete(w.edges, edgeKey{ep, item, "reaches"})
+	}
+	var badges []string
+	for _, bd := range w.nodes[ep].Badges {
+		if !strings.HasSuffix(bd, " more") {
+			badges = append(badges, bd)
+		}
+	}
+	w.nodes[ep].Badges = badges
+	deg := w.degree()
+	for id := range w.context {
+		if deg[id] == 0 && w.nodes[id] != nil && w.nodes[id].Kind != KindEntrypoint {
+			delete(w.nodes, id)
+			delete(w.context, id)
+		}
+	}
 }
 
 func (b *builder) reachNode(w *work, id string) {

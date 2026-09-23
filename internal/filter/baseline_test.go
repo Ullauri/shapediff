@@ -154,15 +154,16 @@ func TestBaselineBudget(t *testing.T) {
 	}
 	// (d) touched and neighbours only, the rest as one node
 	dd := BaselineView(d, head, base, Options{Budget: Budget{Chars: 1000, Nodes: 3, Edges: 100, NarrowTargets: 2}, Measure: measureLines})
-	if h := dd.Map.NodeByID("more:hidden"); h == nil || !strings.HasPrefix(h.Label, "+") || dd.Hidden == 0 {
+	if h := dd.Map.NodeByID(hiddenID); h == nil || !strings.HasPrefix(h.Label, "+") || dd.Hidden == 0 {
 		t.Errorf("step d: %+v hidden=%d nodes=%v", h, dd.Hidden, nodeIDs(dd.Map))
 	}
 	if dd.Map.NodeByID("pkg:acme/svc/internal/p0") == nil {
 		t.Errorf("touched package dropped: %v", nodeIDs(dd.Map))
 	}
-	// folded packages that were then hidden count once, as hidden
-	if dd.Collapsed+dd.Hidden != 7 {
-		t.Errorf("collapsed %d + hidden %d != 7 untouched packages", dd.Collapsed, dd.Hidden)
+	// the fold node is a neighbour of p0 and stays; the root package is
+	// hidden; cmd is drawn: 5 folded + 1 hidden, each package counted once
+	if dd.Collapsed != 5 || dd.Hidden != 1 || dd.Map.NodeByID("more:internal") == nil || dd.Map.NodeByID("pkg:acme/svc/cmd/svc") == nil {
+		t.Errorf("collapsed %d hidden %d nodes %v", dd.Collapsed, dd.Hidden, nodeIDs(dd.Map))
 	}
 	// determinism under the budget
 	dd2 := BaselineView(d, head, base, Options{Budget: Budget{Chars: 1000, Nodes: 3, Edges: 100, NarrowTargets: 2}, Measure: measureLines})
@@ -190,13 +191,52 @@ func TestBaselineStepFKeepsTopBPlusOne(t *testing.T) {
 	if bl.Map == nil || bl.MapOmitted {
 		t.Fatalf("map omitted under a generous character budget: %+v", bl)
 	}
-	if len(bl.Map.Nodes) != 25 || bl.Hidden != 6 || bl.Map.NodeByID("more:hidden").Label != "+6 packages" {
+	if len(bl.Map.Nodes) != 25 || bl.Hidden != 6 || bl.Map.NodeByID(hiddenID).Label != "+6 packages" {
 		t.Errorf("step f: %d nodes hidden=%d %v", len(bl.Map.Nodes), bl.Hidden, nodeIDs(bl.Map))
 	}
 	// B lowers on the character budget until the source fits
 	bl = BaselineView(d, ix, ix, Options{Budget: Budget{Chars: 13, Nodes: 24, Edges: 36, NarrowTargets: 2}, Measure: measureLines})
 	if bl.Map == nil || len(bl.Map.Nodes) != 13 || bl.Hidden != 18 {
 		t.Errorf("step f lowering B: %+v nodes=%d", bl, len(bl.Map.Nodes))
+	}
+}
+
+func TestBaselineNodeCapBelowFloor(t *testing.T) {
+	ix, d := manyTouched(12)
+	bl := BaselineView(d, ix, ix, Options{Budget: Budget{Chars: 100000, Nodes: 4, Edges: 36, NarrowTargets: 2}, Measure: measureLines})
+	if bl.Map == nil || len(bl.Map.Nodes) != 5 || bl.Hidden != 8 {
+		t.Errorf("a node cap under the floor must still cut: %+v nodes=%d", bl, len(bl.Map.Nodes))
+	}
+}
+
+func TestBaselineStepDKeepsNeighboursAtExactlyB(t *testing.T) {
+	// 1 touched package with 5 neighbours (cmd imports p0, p0 imports
+	// p1..p4), each package in its own directory so step c cannot fold,
+	// and 3 far packages: step d keeps 6 nodes plus the "+3 packages"
+	// node under a cap of 6, which is B plus one.
+	g := newGB().pkg("acme/svc/cmd/x").pkg("acme/svc/p0/x")
+	m := g.sym("acme/svc/cmd/x", "main", "func")
+	g.entry("cli", "svc", m)
+	g.imports("acme/svc/cmd/x", "acme/svc/p0/x")
+	f := g.sym("acme/svc/p0/x", "F", "func")
+	for i := 1; i <= 4; i++ {
+		p := fmt.Sprintf("acme/svc/p%d/x", i)
+		g.pkg(p)
+		g.sym(p, "F", "func")
+		g.imports("acme/svc/p0/x", p)
+	}
+	for i := 0; i < 3; i++ {
+		p := fmt.Sprintf("acme/svc/far%d/x", i)
+		g.pkg(p)
+		g.sym(p, "F", "func")
+	}
+	ix := g.index()
+	d := newDelta()
+	d.Nodes.BodyChanged = []string{f}
+	d.Canonicalize()
+	bl := BaselineView(d, ix, ix, Options{Budget: Budget{Chars: 100000, Nodes: 6, Edges: 36, NarrowTargets: 2}, Measure: measureLines})
+	if bl.Map == nil || len(bl.Map.Nodes) != 7 || bl.Map.NodeByID("pkg:acme/svc/p4/x") == nil || bl.Map.NodeByID("pkg:acme/svc/far0/x") != nil || bl.Hidden != 3 {
+		t.Errorf("step d must keep B neighbours plus the remainder: %v hidden=%d", nodeIDs(bl.Map), bl.Hidden)
 	}
 }
 
@@ -217,6 +257,9 @@ func TestBaselineTestOnlyPackageGainingCode(t *testing.T) {
 	bl := BaselineView(d, head, base, Options{Budget: defaultBudget()})
 	if bl.Packages != 2 || bl.External != 0 || len(bl.Touched) != 1 || bl.Touched[0].ID != "pkg:acme/svc/x" || bl.Map.NodeByID("pkg:acme/svc/x") == nil {
 		t.Errorf("package gaining its first symbol must be on the map: %+v", bl)
+	}
+	if r := bl.Touched[0]; r.Dir != "acme/svc/x" || r.Symbols != 2 || r.Added != 1 {
+		t.Errorf("its row must be read from head: %+v", r)
 	}
 }
 

@@ -57,7 +57,7 @@ func Note(in NoteInput) (string, error) {
 	if len(in.Sentences) > 0 {
 		b.WriteString("\n" + strings.Join(in.Sentences, " ") + "\n")
 	}
-	if in.Baseline != nil && in.Baseline.Packages > 0 {
+	if in.Baseline != nil && (in.Baseline.Map != nil || len(in.Baseline.Touched) > 0) {
 		writeBaseline(&b, in)
 	}
 	if in.Filter.Dataflow != nil {
@@ -118,11 +118,23 @@ func writeBaseline(b *strings.Builder, in NoteInput) {
 	if bl.External > 0 {
 		fmt.Fprintf(b, " (%d external %s not drawn)", bl.External, plural(bl.External, "module", "modules"))
 	}
-	switch n := len(bl.Touched); n {
-	case 0:
+	changed, added := 0, 0
+	for _, t := range bl.Touched {
+		if t.Status == filter.StatusAdded {
+			added++
+		} else {
+			changed++
+		}
+	}
+	switch {
+	case changed == 0 && added == 0:
 		b.WriteString(". This MR changes code in none of them.\n")
+	case changed == 0:
+		fmt.Fprintf(b, ". This MR adds %d new %s.\n", added, plural(added, "package", "packages"))
+	case added == 0:
+		fmt.Fprintf(b, ". This MR changes code in %d of them.\n", changed)
 	default:
-		fmt.Fprintf(b, ". This MR changes code in %d of them.\n", n)
+		fmt.Fprintf(b, ". This MR changes code in %d of them and adds %d new %s.\n", changed, added, plural(added, "package", "packages"))
 	}
 	if len(bl.Touched) > 0 {
 		b.WriteString("\n| package | symbols | this MR | imported by | reached from | talks to |\n|---|---|---|---|---|---|\n")

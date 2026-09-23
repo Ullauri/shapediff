@@ -30,8 +30,8 @@ type Baseline struct {
 	// fit the budget; Hidden counts packages dropped by the terminal rule.
 	Collapsed, Hidden int
 	// MapOmitted is set when even the terminal rule could not bring the
-	// map under the character budget (long labels); Map is then nil and
-	// the table stands alone.
+	// map under the character budget (long labels) or the edge cap; Map
+	// is then nil and the table stands alone.
 	MapOmitted bool
 	// EntryStatus is added or removed for an entry point the MR added or
 	// removed, so a table row can say which of its doors are new or gone.
@@ -163,9 +163,14 @@ func newMapBuilder(b *builder) *mapBuilder {
 	}
 	for _, p := range b.base.Doc.Packages {
 		switch {
-		case hasCode(b.base, p.ID) || (b.head.Packages[p.ID] != nil && hasCode(b.head, p.ID)):
+		case hasCode(b.base, p.ID):
 			m.internal = append(m.internal, p.ID)
 			m.ix[p.ID] = b.base
+			m.basePackages++
+		case b.head.Packages[p.ID] != nil && hasCode(b.head, p.ID):
+			// tests only at base, real code at head: the facts live at head
+			m.internal = append(m.internal, p.ID)
+			m.ix[p.ID] = b.head
 			m.basePackages++
 		case len(m.nodes[b.base][p.ID]) == 0:
 			m.external++
@@ -576,14 +581,14 @@ func (m *mapBuilder) isTouched(id string) bool {
 // more packages" node, most packages first; (d) keep the touched packages
 // and their direct neighbours only, with a "+N packages" node; (e) keep
 // the touched packages only; (f) keep the top-B touched packages by
-// changed-symbol count. Step f always terminates the loop.
-// Step f keeps top-B packages plus the "+N packages" node, as section 9
-// step 4f does, and lowers B on the character budget alone; fits says
-// whether the result may be drawn.
+// changed-symbol count, lowering B while the source is still over S.
+// Throughout, the "+N packages" node sits beside the B, as section 9 step
+// 4f's "+N more" does. Step f always terminates the loop; fits says
+// whether what is left may be drawn.
 func (m *mapBuilder) fit(w *work, bl *Baseline) {
 	b := m.b
 	B := b.opts.Budget.Nodes
-	over := func() bool { return b.over(w, B) }
+	over := func() bool { return m.over(w, B) }
 	if !over() {
 		return
 	}
@@ -671,8 +676,9 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) {
 	}
 	m.keepOnly(w, keep, bl)
 	// (f) top-B touched packages by changed count, then by ID, plus the
-	// "+N packages" node; B drops while the source is still over S
-	for B >= terminalFloor {
+	// "+N packages" node; the cut runs at least once, B then drops while
+	// the source is still over S, down to the floor
+	for {
 		var ids []string
 		for id := range w.nodes {
 			if m.isTouched(id) {
@@ -692,16 +698,24 @@ func (m *mapBuilder) fit(w *work, bl *Baseline) {
 			}
 			m.keepOnly(w, keep, bl)
 		}
-		if m.fits(w) {
+		if m.fits(w) || B-terminalStep < terminalFloor {
 			return
 		}
 		B -= terminalStep
 	}
 }
 
+// over is the budget with the "+N packages" node not counted against B.
+func (m *mapBuilder) over(w *work, B int) bool {
+	n := len(w.nodes)
+	if w.nodes[hiddenID] != nil {
+		n--
+	}
+	return n > B || !m.fits(w)
+}
+
 // fits is the budget minus the node cap: the character budget and the
-// edge cap. Step f's "+N packages" node sits beside the top-B, exactly as
-// section 9 step 4f's "+N more" does, so the node count is B plus one.
+// edge cap.
 func (m *mapBuilder) fits(w *work) bool {
 	bud := m.b.opts.Budget
 	if len(w.edges) > bud.Edges {
@@ -709,6 +723,10 @@ func (m *mapBuilder) fits(w *work) bool {
 	}
 	return bud.Chars <= 0 || m.b.measure(w) <= bud.Chars
 }
+
+// hiddenID is the "+N packages" remainder node. Its prefix is not "more:",
+// so a directory named hidden cannot fold into it.
+const hiddenID = "hidden:packages"
 
 // dropOrphanEnds removes entry and sink nodes with no remaining edge.
 func (m *mapBuilder) dropOrphanEnds(w *work) {
@@ -725,7 +743,6 @@ func (m *mapBuilder) dropOrphanEnds(w *work) {
 // keepOnly restricts the map to keep, folding every dropped package into
 // one "+N packages" node (entry and sink nodes are dropped silently).
 func (m *mapBuilder) keepOnly(w *work, keep map[string]bool, bl *Baseline) {
-	const hiddenID = "more:hidden"
 	hidden := 0
 	if n := w.nodes[hiddenID]; n != nil {
 		hidden = n.CollapsedCount

@@ -7,7 +7,7 @@ head does not compile: `acme/svc/broken` (2 changes hidden)
 
 #### Where this lands
 
-At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external module not drawn). This MR changes code in 2 of them.
+At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external module not drawn). This MR changes code in 1 of them and adds 1 new package.
 
 | package | symbols | this MR | imported by | reached from | talks to |
 |---|---|---|---|---|---|

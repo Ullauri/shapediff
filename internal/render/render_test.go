@@ -127,7 +127,7 @@ func TestNoteGolden(t *testing.T) {
 				{From: "pkg:acme/svc/orders", To: "pkg:acme/svc/util", Kind: "imports", Status: filter.EdgeAdded},
 				{From: "pkg:acme/svc/store", To: "sinkkind:db", Kind: "writes", Status: filter.EdgeUnchanged}},
 			Subgraphs: []string{}},
-		Collapsed: 4}
+		Collapsed: 4, EntryStatus: map[string]string{"entry:http:POST /orders": "added"}}
 	mode := "InstantiateGenerics"
 	in := NoteInput{Delta: d, Filter: res, Baseline: bl, Headline: "0 endpoints added, 1 endpoint's reach changed, 1 signature changed (3 callers), 1 package added.",
 		Suppression: "head does not compile: `acme/svc/broken` (2 changes hidden)", Sentences: []string{"`POST /orders` now reaches `orders`.", "`(*Service).Create` changed signature (3 callers)."},
@@ -143,7 +143,7 @@ func TestNoteGolden(t *testing.T) {
 	order := []string{"**0 endpoints added", "head does not compile", "now reaches", "#### Where this lands",
 		"At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external module not drawn). This MR changes code in 2 of them.",
 		"| package | symbols | this MR | imported by | reached from | talks to |",
-		"| [`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders) | 12 | 1 added, 1 changed | `api`, `billing`, `cron`, `export`, +1 | `POST /orders` | `db orders` |",
+		"| [`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders) | 12 | 1 added, 1 changed | `api`, `billing`, `cron`, `export`, +1 | `POST /orders` (new) | `db orders` |",
 		"| [`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util) | 3 | new package | `orders` | — | — |",
 		"classDef touched", `(["2 http routes"])`, BaselineLegend + " 4 untouched packages folded into their directory to fit.", "#### Dataflow", "#### Call paths", Legend, "<details><summary>1 more call-path diagram", "**GET /x**", "#### Module wiring", "<details><summary>Details", "| node | status |", "[orders/v.go:7](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7)", "[util/o.go:1](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1)", "**Renames**", "`Old` → `Older` ?", "**Body-only changes**", "**Wide-reach changes**", "**Suppressed packages**", "2 nodes hidden by the budget", "**Warnings**", "vta took 41s", "extractor go-xtools 0.1.0 (typed, go1.26.0), base aaaaaaaa, head bbbbbbbb, 1.234s"}
 	pos := 0

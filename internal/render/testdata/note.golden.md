@@ -11,7 +11,7 @@ At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external 
 
 | package | symbols | this MR | imported by | reached from | talks to |
 |---|---|---|---|---|---|
-| [`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders) | 12 | 1 added, 1 changed | `api`, `billing`, `cron`, `export`, +1 | `POST /orders` | `db orders` |
+| [`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders) | 12 | 1 added, 1 changed | `api`, `billing`, `cron`, `export`, +1 | `POST /orders` (new) | `db orders` |
 | [`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util) | 3 | new package | `orders` | — | — |
 
 ```mermaid

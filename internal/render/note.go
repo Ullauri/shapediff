@@ -152,7 +152,7 @@ func writeBaseline(b *strings.Builder, in NoteInput) {
 				}
 				did = append(did, fmt.Sprintf("%d %s", c.n, c.what))
 			}
-			fmt.Fprintf(b, "| %s | %d | %s | %s | %s | %s |\n", name, t.Symbols, strings.Join(did, ", "), shortList(t.ImportedBy, 4), shortList(t.Entrypoints, 4), shortList(t.Sinks, 4))
+			fmt.Fprintf(b, "| %s | %d | %s | %s | %s | %s |\n", name, t.Symbols, strings.Join(did, ", "), shortList(t.ImportedBy, 4, nil), shortList(t.Entrypoints, 4, bl.EntryStatus), shortList(t.Sinks, 4, nil))
 		}
 	}
 	if bl.Map == nil {
@@ -179,8 +179,9 @@ func writeBaseline(b *strings.Builder, in NoteInput) {
 
 // shortList renders up to max names from IDs, then "+N"; "—" when empty.
 // Sinks carry their kind so a table named like a package reads
-// unambiguously.
-func shortList(ids []string, max int) string {
+// unambiguously; an entry point the MR added or removed says so, since
+// the row is otherwise a base fact.
+func shortList(ids []string, max int, status map[string]string) string {
 	if len(ids) == 0 {
 		return "—"
 	}
@@ -196,7 +197,14 @@ func shortList(ids []string, max int) string {
 				name = p[1] + " " + p[2]
 			}
 		}
-		parts = append(parts, "`"+mdEsc(name)+"`")
+		part := "`" + mdEsc(name) + "`"
+		switch status[id] {
+		case "added":
+			part += " (new)"
+		case "removed":
+			part += " (removed)"
+		}
+		parts = append(parts, part)
 	}
 	return strings.Join(parts, ", ")
 }

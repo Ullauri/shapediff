@@ -33,6 +33,9 @@ type Baseline struct {
 	// map under the character budget (long labels); Map is then nil and
 	// the table stands alone.
 	MapOmitted bool
+	// EntryStatus is added or removed for an entry point the MR added or
+	// removed, so a table row can say which of its doors are new or gone.
+	EntryStatus map[string]string
 }
 
 // TouchedPackage is what a reader needs to know about one package the MR
@@ -68,7 +71,7 @@ type TouchedPackage struct {
 func BaselineView(d *delta.Delta, head, base *graph.Index, opts Options) *Baseline {
 	b := newBuilder(d, head, base, opts)
 	m := newMapBuilder(b)
-	bl := &Baseline{Packages: m.basePackages, External: m.external, Entrypoints: m.entryCount, Sinks: m.sinkCount}
+	bl := &Baseline{Packages: m.basePackages, External: m.external, Entrypoints: m.entryCount, Sinks: m.sinkCount, EntryStatus: m.entryStatus}
 	if len(m.internal) == 0 {
 		return bl
 	}

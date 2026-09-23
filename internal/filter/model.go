@@ -22,6 +22,9 @@ const (
 	StatusSignatureChanged = "signature_changed"
 	StatusContext          = "context"
 	StatusQuery            = "query"
+	// StatusTouched marks a package the MR changed inside, on the baseline
+	// map; the map draws the shape and this is the "you are here".
+	StatusTouched = "touched"
 )
 
 // Edge statuses.
@@ -43,11 +46,15 @@ type Diagram struct {
 
 // Node is one drawn node.
 type Node struct {
-	ID             string
-	Label          string
-	Kind           string
-	Status         string
-	Package        string // import path, "" for entry points, sinks and the remainder node
+	ID      string
+	Label   string
+	Kind    string
+	Status  string
+	Package string // import path, "" for entry points, sinks and the remainder node
+	// Group boxes the node under a labelled subgraph that is not a package:
+	// the baseline map groups packages by directory. Empty for every other
+	// diagram.
+	Group          string
 	Badges         []string
 	BodyChanged    bool
 	CollapsedCount int

@@ -14,45 +14,74 @@ import (
 // Legend is the line printed under every call-path diagram.
 const Legend = "Legend: green added, red dashed removed, amber signature changed, grey context; `*` body also changed; dashed edge dynamic dispatch, dotted edge inferred."
 
-// classDefs is the styling preamble. It counts against the character budget.
-// Every class sets color as well as fill: Mermaid otherwise takes the text
-// colour from the viewer theme, and a dark theme puts light text on these
-// pastel fills, hiding every label.
-const classDefs = `  classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
-  classDef removed fill:#fff1f2,stroke:#dc2626,stroke-dasharray:5 3,color:#1f2937
-  classDef signature_changed fill:#fef3c7,stroke:#d97706,color:#1f2937
-  classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
-  classDef query fill:#dbeafe,stroke:#2563eb,color:#1f2937
-  classDef more fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:2 2,color:#1f2937
-`
+// classDefs is the styling preamble, one line per class, emitted only for
+// the classes a diagram uses because every line counts against the
+// character budget (all six cost about a quarter of the default S). Every
+// class sets color as well as fill: Mermaid otherwise takes the text colour
+// from the viewer theme, and a dark theme puts light text on these pastel
+// fills, hiding every label.
+var classDefs = map[string]string{
+	filter.StatusAdded:            "fill:#dcfce7,stroke:#16a34a,color:#1f2937",
+	filter.StatusRemoved:          "fill:#fff1f2,stroke:#dc2626,stroke-dasharray:5 3,color:#1f2937",
+	filter.StatusSignatureChanged: "fill:#fef3c7,stroke:#d97706,color:#1f2937",
+	filter.StatusContext:          "fill:#f3f4f6,stroke:#9ca3af,color:#1f2937",
+	filter.StatusQuery:            "fill:#dbeafe,stroke:#2563eb,color:#1f2937",
+	filter.StatusTouched:          "fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#1f2937",
+	"more":                        "fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:2 2,color:#1f2937",
+}
 
 // Mermaid renders one diagram as flowchart LR source (without fences).
 func Mermaid(dg *filter.Diagram) string {
 	var b strings.Builder
 	b.WriteString("flowchart LR\n")
-	b.WriteString(classDefs)
+	classes := map[string][]string{}
+	for _, n := range dg.Nodes {
+		cls := n.Status
+		if n.Kind == filter.KindMore && n.Status == filter.StatusContext {
+			cls = "more"
+		}
+		classes[cls] = append(classes[cls], nID(n.ID))
+	}
+	names := make([]string, 0, len(classes))
+	for c := range classes {
+		names = append(names, c)
+	}
+	sort.Strings(names)
+	for _, c := range names {
+		if def, ok := classDefs[c]; ok {
+			fmt.Fprintf(&b, "  classDef %s %s\n", c, def)
+		}
+	}
 
-	byPkg := map[string][]filter.Node{}
+	// A node is boxed under its package subgraph (call paths) or under its
+	// Group (the baseline map, where the nodes are packages themselves).
+	byBox := map[string][]filter.Node{}
+	boxLabel := map[string]string{}
 	var bare []filter.Node
 	sub := map[string]bool{}
 	for _, s := range dg.Subgraphs {
 		sub[s] = true
 	}
 	for _, n := range dg.Nodes {
-		if n.Package != "" && n.Kind != filter.KindPackage && sub["pkg:"+n.Package] {
-			byPkg[n.Package] = append(byPkg[n.Package], n)
-			continue
+		switch {
+		case n.Group != "":
+			byBox[n.Group] = append(byBox[n.Group], n)
+			boxLabel[n.Group] = n.Group
+		case n.Package != "" && n.Kind != filter.KindPackage && sub["pkg:"+n.Package]:
+			byBox[n.Package] = append(byBox[n.Package], n)
+			boxLabel[n.Package] = shortPkg(n.Package)
+		default:
+			bare = append(bare, n)
 		}
-		bare = append(bare, n)
 	}
-	pkgs := make([]string, 0, len(byPkg))
-	for p := range byPkg {
-		pkgs = append(pkgs, p)
+	boxes := make([]string, 0, len(byBox))
+	for p := range byBox {
+		boxes = append(boxes, p)
 	}
-	sort.Strings(pkgs)
-	for _, p := range pkgs {
-		fmt.Fprintf(&b, "  subgraph %s[\"%s\"]\n", sgID(p), esc(shortPkg(p)))
-		for _, n := range byPkg[p] {
+	sort.Strings(boxes)
+	for _, p := range boxes {
+		fmt.Fprintf(&b, "  subgraph %s[\"%s\"]\n", sgID(p), esc(boxLabel[p]))
+		for _, n := range byBox[p] {
 			b.WriteString("  ")
 			writeNode(&b, n)
 		}
@@ -89,19 +118,6 @@ func Mermaid(dg *filter.Diagram) string {
 	for _, s := range styles {
 		b.WriteString(s)
 	}
-	classes := map[string][]string{}
-	for _, n := range dg.Nodes {
-		cls := n.Status
-		if n.Kind == filter.KindMore && n.Status == filter.StatusContext {
-			cls = "more"
-		}
-		classes[cls] = append(classes[cls], nID(n.ID))
-	}
-	names := make([]string, 0, len(classes))
-	for c := range classes {
-		names = append(names, c)
-	}
-	sort.Strings(names)
 	for _, c := range names {
 		fmt.Fprintf(&b, "  class %s %s\n", strings.Join(classes[c], ","), c)
 	}
@@ -123,11 +139,15 @@ func writeNode(b *strings.Builder, n filter.Node) {
 }
 
 // Label is the display label of a node: name, `*` when the body also
-// changed, collapsed count for packages, badges in parentheses.
+// changed, collapsed count for packages, badges in parentheses. A package
+// node's label is its short name unless the filter preset one (the
+// baseline map does, so `internal/graph` and `cmd/graph` stay distinct).
 func Label(n filter.Node) string {
 	l := n.Label
 	if n.Kind == filter.KindPackage {
-		l = shortPkg(n.Package)
+		if l == "" {
+			l = shortPkg(n.Package)
+		}
 		if n.CollapsedCount > 0 {
 			l = fmt.Sprintf("%s (%d symbols)", l, n.CollapsedCount)
 		}

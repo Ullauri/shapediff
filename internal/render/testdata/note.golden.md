@@ -9,12 +9,7 @@ head does not compile: `acme/svc/broken` (2 changes hidden)
 
 ```mermaid
 flowchart LR
-  classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
-  classDef removed fill:#fff1f2,stroke:#dc2626,stroke-dasharray:5 3,color:#1f2937
-  classDef signature_changed fill:#fef3c7,stroke:#d97706,color:#1f2937
   classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
-  classDef query fill:#dbeafe,stroke:#2563eb,color:#1f2937
-  classDef more fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:2 2,color:#1f2937
   ndcb5c3a1(["POST /orders"])
   nc5b8bb09[("orders")]
   ndcb5c3a1 --> nc5b8bb09
@@ -27,11 +22,9 @@ flowchart LR
 ```mermaid
 flowchart LR
   classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
+  classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
   classDef removed fill:#fff1f2,stroke:#dc2626,stroke-dasharray:5 3,color:#1f2937
   classDef signature_changed fill:#fef3c7,stroke:#d97706,color:#1f2937
-  classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
-  classDef query fill:#dbeafe,stroke:#2563eb,color:#1f2937
-  classDef more fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:2 2,color:#1f2937
   subgraph sg2f27a5c6["orders"]
     na3c6eddb["(*Service).Create* (+3 callers)"]
     n7e4a7fe1["Handler"]
@@ -64,11 +57,6 @@ Legend: green added, red dashed removed, amber signature changed, grey context; 
 ```mermaid
 flowchart LR
   classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
-  classDef removed fill:#fff1f2,stroke:#dc2626,stroke-dasharray:5 3,color:#1f2937
-  classDef signature_changed fill:#fef3c7,stroke:#d97706,color:#1f2937
-  classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
-  classDef query fill:#dbeafe,stroke:#2563eb,color:#1f2937
-  classDef more fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:2 2,color:#1f2937
   subgraph sge40c292c["a"]
     na90b54ed["B"]
   end
@@ -81,11 +69,7 @@ flowchart LR
 ```mermaid
 flowchart LR
   classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
-  classDef removed fill:#fff1f2,stroke:#dc2626,stroke-dasharray:5 3,color:#1f2937
-  classDef signature_changed fill:#fef3c7,stroke:#d97706,color:#1f2937
   classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
-  classDef query fill:#dbeafe,stroke:#2563eb,color:#1f2937
-  classDef more fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:2 2,color:#1f2937
   n7309427a[["orders"]]
   na7fef5cf[["util"]]
   n7309427a --> na7fef5cf

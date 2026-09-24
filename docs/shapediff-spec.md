@@ -40,6 +40,7 @@ Make structural change legible, fast, at two cadences.
   of where change concentrated and how the structure drifted over the week.
   Not a stack of per-MR diagrams.
 
+
 A short prose summary accompanies the diagrams. The prose is **rendered by
 template from the same structured delta the diagrams are drawn from**, so
 they cannot disagree. An LLM may later rewrite the templated sentences for
@@ -704,7 +705,7 @@ Algorithm:
       ties by ID, degree recomputed after each collapse, groups of two or
       more only.
    d. Collapse focus nodes in the same package with identical
-      added/removed status into one "N symbols" node, **exempting** nodes
+      added/removed status into one "`pkg` +N more" node, **exempting** nodes
       on a `changed_paths` route and `signature_changed` nodes, which are
       the MR's subject.
    e. Split into one diagram per changed entrypoint plus one "not reachable
@@ -716,6 +717,17 @@ Algorithm:
       `S` (long labels), lower `B` by 4 and repeat this step; below `B = 8`,
       fall back to the graphviz SVG attachment (section 10). This step
       always terminates the loop.
+   g. **Orphan rule.** A node with no drawn edge is not drawn. It carries no
+      path information — the diagram is called call *paths* — and the budget
+      it spends is budget the surviving edges need. The prune runs before
+      step 4, again after any collapse in 4c or 4d (merging edges can strand
+      a node by turning its last edge into a self loop), and again after 4e
+      and 4f, which keep nodes by priority but only the edges *among* them
+      and so strand nodes of their own. The "+N more" remainder of 4f is
+      edgeless by construction and is exempt. Every pruned node keeps its row,
+      with its permalink, in the note's details table, and the count is
+      reported there; nothing is dropped silently. If a diagram has no edges
+      left at the end, it is not drawn at all: there were no paths to show.
 5. **Dataflow diagram** is drawn separately and independently of budget:
    one row per changed entrypoint, showing `reach_added` and
    `reach_removed` only, at package-and-sink granularity. This diagram is
@@ -723,6 +735,15 @@ Algorithm:
 6. **Module wiring diagram** is drawn only when `packages.added`,
    `packages.removed`, or `imports_added/removed` is non-empty. Shows
    touched packages and their imports, added edges green, removed red.
+   **Test and generated packages are excluded**, as they are from the focus
+   set in step 1, and the count left out is reported in the details section:
+   a repo with a test module per source module otherwise draws a wiring
+   diagram that is mostly test modules. Step 5 is exempt from the budget
+   because it is small by construction; this diagram is **not**, so the node
+   and character budgets apply, through the terminal rule of 4f only — steps
+   4a to 4d are about call edges and symbol nodes, and this diagram has
+   neither. Being over budget here is a legibility problem, not a reason to
+   fall back to SVG. The orphan rule of 4g applies.
 
 If the MR has no structural change at all (`stats.structural` is false),
 **nothing is drawn and no note is posted** (section 14.1). This case must
@@ -1164,9 +1185,6 @@ it) and exit 0. The job must never block a pipeline.
 
 ### 14.2 Weekly
 
-A scheduled pipeline in a central "structure" project, Monday 06:00,
-**enabled only after phase 3 has passed on at least one repo**:
-
 - For each configured repo: weekly delta (section 8.3), attribution from
   cached per-MR deltas, pinned-layout diagram with the resolved SHAs
   printed.
@@ -1461,3 +1479,49 @@ to archify.
   graph, the fixture scenarios are named once and supplied per language
   with `n/a` requiring a reason, and phases 1 and 6 gate on the suite.
   Sections 12, 15, 16 and 17 updated to match.
+
+### Added in v0.4.1 (legibility review, 2026-09-24)
+
+Four readings of the rendered note on a real pilot repo, by the owner, found
+that the diagrams were being judged unreadable for reasons the algorithm
+could fix. The MRs were re-rendered before and after each change.
+
+- **Orphan rule, section 9 step 4g.** The worst case measured drew 21 boxes
+  and one arrow: the budget counted nodes and dropped edges as collateral,
+  and nothing reconsidered a node once its last edge had gone. The same MR
+  now draws 3 nodes and 1 edge, and the 20 definitions that left the diagram
+  gained rows, with permalinks, in the details table — which is where they
+  were legible in the first place.
+- **Test and generated packages out of the module wiring, section 9 step 6.**
+  Nine of twenty nodes in the measured wiring diagram were test modules,
+  pulled in by a rule that step 1 already applies to the call paths. Same MR:
+  20 nodes and 46 edges to 11 and 14.
+- **The wiring diagram is budgeted.** It had been exempted by analogy with
+  the dataflow diagram of step 5, whose exemption rests on "almost always
+  small". That is true of dataflow and false of wiring: the measured diagram
+  ran 46 edges against a cap of 36.
+
+- **One key, above the first diagram, and it names the shapes** (section 10).
+  The legend line was printed under the call-path diagram and nowhere else,
+  so a reader of the dataflow diagram — the first one in the note, and often
+  the only one they need — got four red arrows and nothing to say what red
+  meant. The shapes were never written down at all, though a stadium, a
+  double border and a cylinder carry as much as the colours do. It is printed
+  once rather than per diagram: section 11 already warns that a marker
+  reviewers meet on every MR is one they learn to skip.
+- **Removed edges are dashed as well as red** (section 10). Hue alone does
+  not separate them in a diagram with dozens of arrows, and removed *nodes*
+  were already dashed.
+- **Collapsed groups are named after their package** (section 9 step 4d).
+  "17 symbols" takes the same space as "..." and says as much; it now reads
+  "`reading` +17 more". "Symbol" is the schema's word, not a reviewer's, and
+  is gone from everything the note prints.
+- **Package labels that collide are widened** (section 10). Two packages
+  called `pipelines` under different parents drew as two boxes with one name.
+  Each drawn package now takes the shortest trailing path unique within its
+  diagram. This is the same defect the README records for the weekly page's
+  "Where change concentrated" table.
+
+The theme of the four above is that both defects came from a rule stated for
+one diagram and silently not inherited by another. The filter's steps are now
+written as rules over diagrams rather than steps in one pipeline.

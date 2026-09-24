@@ -35,6 +35,8 @@ flowchart LR
 ```
 Legend: purple changed by this MR, green added, red dashed removed, grey untouched; rounded entry points, cylinder sinks; arrows are imports; boxes are directories. 4 untouched packages folded into their directory to fit.
 
+**Key.** A rounded box is an entry point, a double-bordered box a package, a cylinder a data store, a plain box a function or definition. Green is added, red dashed removed, amber a changed signature, grey unchanged context drawn for orientation. Arrows take the same colours; a dotted arrow is an inferred call, a dashed one dynamic dispatch. `*` marks a definition whose body also changed, and `name +N more` is a group of N definitions drawn as one box.
+
 #### Dataflow
 
 ```mermaid
@@ -61,7 +63,7 @@ flowchart LR
     n3fa7fd89["Validate"]
   end
   ndcb5c3a1(["POST /orders"])
-  na7fef5cf[["util (3 symbols)"]]
+  na7fef5cf[["util +3 more"]]
   nc5b8bb09[("orders")]
   n6e4081b5["Old"]
   ndcb5c3a1 --> n7e4a7fe1
@@ -72,13 +74,12 @@ flowchart LR
   n7e4a7fe1 --> n6e4081b5
   linkStyle 3 stroke:#16a34a,stroke-width:2px
   linkStyle 4 stroke-dasharray:2 2
-  linkStyle 5 stroke:#dc2626,stroke-width:2px
+  linkStyle 5 stroke:#dc2626,stroke-width:2px,stroke-dasharray:5 3
   class n3fa7fd89 added
   class ndcb5c3a1,na7fef5cf,nc5b8bb09,n7e4a7fe1 context
   class n6e4081b5 removed
   class na3c6eddb signature_changed
 ```
-Legend: green added, red dashed removed, amber signature changed, grey context; `*` body also changed; dashed edge dynamic dispatch, dotted edge inferred.
 
 <details><summary>1 more call-path diagram</summary>
 
@@ -136,7 +137,7 @@ flowchart LR
 
 - `acme/svc/broken`: base ok, head partial, 2 removals and 0 additions hidden
 
-2 nodes hidden by the budget, 3 symbols collapsed into packages, 0 generated and 0 test symbols not drawn.
+2 nodes hidden by the budget, 0 on no drawn path, 3 definitions collapsed into packages, 0 generated and 0 test definitions not drawn, 0 test packages left out of the wiring.
 
 **Warnings**
 

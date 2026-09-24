@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 
+	"strings"
+
 	"github.com/Ullauri/shapediff/internal/delta"
 	"github.com/Ullauri/shapediff/internal/graph"
 )
@@ -21,13 +23,29 @@ const sigCallerCap = 8  // callers of a signature change exempt from collapse (s
 const terminalFloor = 8 // below this B the terminal rule falls back to SVG (step 4f)
 const terminalStep = 4  // how much B drops per terminal iteration
 
+// hiddenMoreID is the terminal rule's remainder marker. It is edgeless by
+// construction, so the orphan prune must keep it.
+const hiddenMoreID = "more:hidden"
+
 // Apply runs section 9 over the delta. head and base are the two graphs.
 func Apply(d *delta.Delta, head, base *graph.Index, opts Options) *Result {
 	b := newBuilder(d, head, base, opts)
 	res := &Result{}
 	w := b.initial()
+	// Prune before budgeting as well as after: an orphan spends node budget
+	// that the surviving edges need, and the terminal rule strands more of
+	// them by keeping the top-B nodes but only the edges among them.
+	b.prune(w)
 	parts := b.budget(w, true, res)
 	for _, p := range parts {
+		b.prune(p)
+		if len(p.edges) == 0 {
+			// Nothing left is on a path, so there is no call-path diagram to
+			// draw. The prune above has already taken every node's row, and
+			// the terminal rule's count is on the builder, so dropping the
+			// part here loses nothing.
+			continue
+		}
 		res.CallPaths = append(res.CallPaths, *p.diagram())
 	}
 	res.Dataflow = b.dataflow()
@@ -60,6 +78,14 @@ type builder struct {
 	collapsedSymbols  int
 	excludedGenerated int
 	excludedTest      int
+	hiddenNodes       int
+	orphans           []Node
+	excludedPkgs      map[string]bool
+	// collapsedInto keeps the nodes a step-4d group stands for, so that if
+	// the group is later pruned the definitions it hid still get table rows.
+	collapsedInto map[string][]Node
+	// testPkg memoises isTestPkg.
+	testPkg map[string]bool
 }
 
 func newBuilder(d *delta.Delta, head, base *graph.Index, opts Options) *builder {
@@ -68,7 +94,8 @@ func newBuilder(d *delta.Delta, head, base *graph.Index, opts Options) *builder 
 		bodyChg: set(d.Nodes.BodyChanged), onPath: map[string]bool{}, focusQuery: set(opts.Focus),
 		pkgAdded: set(d.Packages.Added), pkgRemoved: set(d.Packages.Removed),
 		addedEdges: map[graph.EdgeKey]bool{}, remEdges: map[graph.EdgeKey]bool{}, pathEdges: map[graph.EdgeKey]bool{},
-		isFocus: map[string]bool{},
+		isFocus: map[string]bool{}, excludedPkgs: map[string]bool{},
+		collapsedInto: map[string][]Node{}, testPkg: map[string]bool{},
 	}
 	b.touched = d.Touched(head, base)
 	for _, id := range opts.Focus {
@@ -101,6 +128,44 @@ func set(ids []string) map[string]bool {
 		m[id] = true
 	}
 	return m
+}
+
+// isTestPkg reports whether a package is entirely test or generated code.
+//
+// The package node's own attrs are authoritative when an extractor sets them,
+// but they are optional: the Go extractor builds package nodes with zero
+// attrs (goextract.ensurePackageNode), and an external test package is a
+// package of its own there. So fall back to the symbols: a package every one
+// of whose definitions is test or generated is a test package. A package with
+// no definitions at all is not, since there is nothing to judge it on.
+func (b *builder) isTestPkg(pkgID string) bool {
+	if v, ok := b.testPkg[pkgID]; ok {
+		return v
+	}
+	v := false
+	if gn, _ := b.lookup(pkgID); gn != nil && (gn.Attrs.Test || gn.Attrs.Generated) {
+		v = true
+	} else {
+		path := strings.TrimPrefix(pkgID, "pkg:")
+		total, flagged := 0, 0
+		for _, ix := range []*graph.Index{b.head, b.base} {
+			for _, n := range ix.Nodes {
+				if n.Kind != graph.KindSymbol || n.Package != path {
+					continue
+				}
+				total++
+				if n.Attrs.Test || n.Attrs.Generated {
+					flagged++
+				}
+			}
+			if total > 0 {
+				break // head is authoritative when it has the package
+			}
+		}
+		v = total > 0 && flagged == total
+	}
+	b.testPkg[pkgID] = v
+	return v
 }
 
 // lookup finds a node in head, then base.
@@ -184,11 +249,15 @@ type work struct {
 	// exempt marks context nodes that step 3 and 4c must keep: callers of
 	// a signature change (up to 8) and nodes on a changed path.
 	exempt map[string]bool
+	// pinned marks nodes the orphan rule of 4g must keep even with no edge.
+	// A package the MR added is the most interesting thing the wiring
+	// diagram has to show, whether or not an import to it was drawn.
+	pinned map[string]bool
 	hidden int
 }
 
 func (b *builder) newWork(title string) *work {
-	return &work{b: b, title: title, nodes: map[string]*Node{}, edges: map[edgeKey]*Edge{}, context: map[string]bool{}, exempt: map[string]bool{}}
+	return &work{b: b, title: title, nodes: map[string]*Node{}, edges: map[edgeKey]*Edge{}, context: map[string]bool{}, exempt: map[string]bool{}, pinned: map[string]bool{}}
 }
 
 func (w *work) addGraphNode(id string) *Node {
@@ -303,10 +372,83 @@ func (w *work) degree() map[string]int {
 	return deg
 }
 
+// prune drops orphans from w and records them for the details table. It
+// reports whether anything went.
+func (b *builder) prune(w *work) bool {
+	gone, n := w.pruneOrphans()
+	b.orphans = append(b.orphans, gone...)
+	return n > 0
+}
+
+// pruneOrphans drops every node left with no drawn edge, returning the ones
+// worth a table row and the total dropped. A call-path diagram is about
+// paths: a node on none of them carries no path information, and the budget
+// it spends is budget the surviving edges need. Pruned nodes keep their row
+// in the note's details table, so no permalink is lost.
+//
+// The terminal rule's remainder marker is edgeless by construction and is
+// kept, so a pruned-out diagram is recognised by having no edges rather than
+// no nodes.
+func (w *work) pruneOrphans() ([]Node, int) {
+	deg := w.degree()
+	var out []Node
+	dropped := 0
+	for _, id := range w.sortedIDs() {
+		if deg[id] > 0 || id == hiddenMoreID || w.pinned[id] {
+			continue
+		}
+		n := w.nodes[id]
+		switch n.Kind {
+		case KindMore:
+			// A step-4d group stands for definitions that were deleted when
+			// it was made. Hand them back so they are rows rather than a
+			// count pointing at a box that is no longer drawn, and stop
+			// counting them as collapsed: they are about to be reported as
+			// orphans, and the footer would otherwise say both.
+			rows := w.b.collapsedInto[id]
+			out = append(out, rows...)
+			w.b.collapsedSymbols -= len(rows)
+		case KindPackage:
+			// A package node has no row in the details table — the table is
+			// keyed by definition — and what it collapsed is already counted
+			// as collapsed symbols. Recording it would inflate the footer.
+		default:
+			out = append(out, rowCopy(n))
+		}
+		delete(w.nodes, id)
+		delete(w.context, id)
+		delete(w.exempt, id)
+		dropped++
+	}
+	return out, dropped
+}
+
+// rowCopy is a Node safe to hand to the details table: no shared slice, and
+// badges in the same order diagram() would render them.
+func rowCopy(n *Node) Node {
+	c := *n
+	c.Badges = append([]string(nil), n.Badges...)
+	sort.Strings(c.Badges)
+	return c
+}
+
 // byPriority sorts IDs by (priority, ID).
+//
+// A drawn node's own priority wins over the builder's, which is keyed on the
+// symbol sets and so scores every pkg: ID as context. That made the
+// prioChanged addPkgNode gives an added or removed package dead, and the
+// terminal rule could drop the package an MR added in favour of an untouched
+// one that sorted earlier.
+func (w *work) prio(id string) int {
+	if n, ok := w.nodes[id]; ok {
+		return n.priority
+	}
+	return w.b.priority(id)
+}
+
 func (w *work) byPriority(ids []string) {
 	sort.Slice(ids, func(i, j int) bool {
-		pi, pj := w.b.priority(ids[i]), w.b.priority(ids[j])
+		pi, pj := w.prio(ids[i]), w.prio(ids[j])
 		if pi != pj {
 			return pi < pj
 		}

@@ -12,7 +12,7 @@ const (
 	KindSymbol     = "symbol"
 	KindEntrypoint = "entrypoint"
 	KindSink       = "sink"
-	KindMore       = "more" // "N symbols" group or "+N more" remainder
+	KindMore       = "more" // "pkg +N more" group or "+N more" remainder
 )
 
 // Node statuses.
@@ -110,12 +110,19 @@ type Omitted struct {
 	// HiddenNodes is the count folded into "+N more" nodes across diagrams.
 	HiddenNodes int
 	// CollapsedSymbols is the count of symbol nodes folded into package or
-	// "N symbols" nodes.
+	// group nodes.
 	CollapsedSymbols int
 	// ExcludedGenerated and ExcludedTest count focus candidates dropped by
 	// step 1.
 	ExcludedGenerated int
 	ExcludedTest      int
+	// ExcludedTestPackages counts test and generated packages left out of the
+	// module wiring diagram (step 6).
+	ExcludedTestPackages int
+	// Orphans lists nodes dropped from the call-path diagrams for having no
+	// drawn edge (step 4g). They keep their row in the note's details table
+	// so the permalink is not lost. Sorted by ID.
+	Orphans []Node
 	// BodyOnly lists body-changed nodes that were not drawn.
 	BodyOnly []string
 	// WideReach lists entrypoints whose wide reach changed.

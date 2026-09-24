@@ -9,10 +9,22 @@ import (
 	"strings"
 
 	"github.com/Ullauri/shapediff/internal/filter"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
-// Legend is the line printed under every call-path diagram.
-const Legend = "Legend: green added, red dashed removed, amber signature changed, grey context; `*` body also changed; dashed edge dynamic dispatch, dotted edge inferred."
+// Legend is the key printed once, above the first diagram in the note.
+//
+// It was previously printed under the call-path diagram and nowhere else, so
+// the dataflow diagram — the first one a reader meets, and often the only one
+// they need — arrived with nothing to say what its colours meant. It is also
+// the only place the node shapes are written down; they carry as much meaning
+// as the colours do. The key sits outside the Mermaid fence, so it costs
+// nothing against the character budget of section 9.
+const Legend = "**Key.** A rounded box is an entry point, a double-bordered box a package, " +
+	"a cylinder a data store, a plain box a function or definition. " +
+	"Green is added, red dashed removed, amber a changed signature, grey unchanged context drawn for orientation. " +
+	"Arrows take the same colours; a dotted arrow is an inferred call, a dashed one dynamic dispatch. " +
+	"`*` marks a definition whose body also changed, and `name +N more` is a group of N definitions drawn as one box."
 
 // classDefs is the styling preamble, one line per class, emitted only for
 // the classes a diagram uses because every line counts against the
@@ -42,16 +54,17 @@ func Mermaid(dg *filter.Diagram) string {
 		}
 		classes[cls] = append(classes[cls], nID(n.ID))
 	}
-	names := make([]string, 0, len(classes))
+	clsNames := make([]string, 0, len(classes))
 	for c := range classes {
-		names = append(names, c)
+		clsNames = append(clsNames, c)
 	}
-	sort.Strings(names)
-	for _, c := range names {
+	sort.Strings(clsNames)
+	for _, c := range clsNames {
 		if def, ok := classDefs[c]; ok {
 			fmt.Fprintf(&b, "  classDef %s %s\n", c, def)
 		}
 	}
+	names := shortNames(dg)
 
 	// A node is boxed under its package subgraph (call paths) or under its
 	// Group (the baseline map, where the nodes are packages themselves).
@@ -69,7 +82,7 @@ func Mermaid(dg *filter.Diagram) string {
 			boxLabel[n.Group] = n.Group
 		case n.Package != "" && n.Kind != filter.KindPackage && sub["pkg:"+n.Package]:
 			byBox[n.Package] = append(byBox[n.Package], n)
-			boxLabel[n.Package] = shortPkg(n.Package)
+			boxLabel[n.Package] = pickName(names, n.Package)
 		default:
 			bare = append(bare, n)
 		}
@@ -83,12 +96,14 @@ func Mermaid(dg *filter.Diagram) string {
 		fmt.Fprintf(&b, "  subgraph %s[\"%s\"]\n", sgID(p), esc(boxLabel[p]))
 		for _, n := range byBox[p] {
 			b.WriteString("  ")
-			writeNode(&b, n)
+			// A Group box is a directory, not a package: its "N more packages"
+			// node keeps its noun.
+			writeNode(&b, n, names, n.Group == "")
 		}
 		b.WriteString("  end\n")
 	}
 	for _, n := range bare {
-		writeNode(&b, n)
+		writeNode(&b, n, names, false)
 	}
 	var styles []string
 	for i, e := range drawnEdges(dg.Edges) {
@@ -108,8 +123,18 @@ func Mermaid(dg *filter.Diagram) string {
 		case filter.EdgeRemoved:
 			st = append(st, "stroke:#dc2626,stroke-width:2px")
 		}
-		if e.Inferred {
+		// One dash pattern only. CSS takes the last declaration, so emitting
+		// both the removed dash and the inferred dot silently dropped the
+		// removed one; an edge can be both. Inferred wins the pattern — it is
+		// a claim about whether the edge is real, which outranks a claim
+		// about when it existed — and removed keeps the colour.
+		switch {
+		case e.Inferred:
 			st = append(st, "stroke-dasharray:2 2")
+		case e.Status == filter.EdgeRemoved:
+			// Dashed as well as red: in a diagram with dozens of arrows hue
+			// alone is not enough, and removed nodes are already dashed.
+			st = append(st, "stroke-dasharray:5 3")
 		}
 		if len(st) > 0 {
 			styles = append(styles, fmt.Sprintf("  linkStyle %d %s\n", i, strings.Join(st, ",")))
@@ -118,14 +143,19 @@ func Mermaid(dg *filter.Diagram) string {
 	for _, s := range styles {
 		b.WriteString(s)
 	}
-	for _, c := range names {
+	for _, c := range clsNames {
 		fmt.Fprintf(&b, "  class %s %s\n", strings.Join(classes[c], ","), c)
 	}
 	return b.String()
 }
 
-func writeNode(b *strings.Builder, n filter.Node) {
-	label := esc(Label(n))
+func writeNode(b *strings.Builder, n filter.Node, names map[string]string, inSubgraph bool) {
+	label := esc(labelIn(n, names))
+	if inSubgraph && n.Kind == filter.KindMore && n.CollapsedCount > 0 {
+		// The box already sits inside its package's subgraph; repeating the
+		// name inside it is noise.
+		label = esc(fmt.Sprintf("+%d more", n.CollapsedCount))
+	}
 	switch n.Kind {
 	case filter.KindEntrypoint:
 		fmt.Fprintf(b, "  %s([\"%s\"])\n", nID(n.ID), label)
@@ -139,17 +169,32 @@ func writeNode(b *strings.Builder, n filter.Node) {
 }
 
 // Label is the display label of a node: name, `*` when the body also
-// changed, collapsed count for packages, badges in parentheses. A package
-// node's label is its short name unless the filter preset one (the
-// baseline map does, so `internal/graph` and `cmd/graph` stay distinct).
-func Label(n filter.Node) string {
+// changed, collapsed count for packages, badges in parentheses. Callers
+// drawing a whole diagram should use labelIn, which disambiguates package
+// names that collide inside it.
+func Label(n filter.Node) string { return labelIn(n, nil) }
+
+// labelIn is Label with the diagram's resolved short package names, from
+// shortNames. A nil map falls back to the last path segment.
+func labelIn(n filter.Node, names map[string]string) string {
 	l := n.Label
+	if n.Kind == filter.KindMore && n.Package != "" && n.CollapsedCount > 0 {
+		// Recomposed rather than trusting the label the filter baked: that
+		// one is the bare last path segment and cannot know what it collides
+		// with in this diagram.
+		l = fmt.Sprintf("%s +%d more", pickName(names, n.Package), n.CollapsedCount)
+	}
 	if n.Kind == filter.KindPackage {
-		if l == "" {
-			l = shortPkg(n.Package)
+		// The baseline map presets the label (the import path relative to
+		// the repo root) and boxes by Group; call-path packages take the
+		// diagram's disambiguated short name.
+		if n.Group == "" || l == "" {
+			l = pickName(names, n.Package)
 		}
 		if n.CollapsedCount > 0 {
-			l = fmt.Sprintf("%s (%d symbols)", l, n.CollapsedCount)
+			// "(8 symbols)" is jargon for a reader who did not write the
+			// extractor, and says nothing "+8" does not.
+			l = fmt.Sprintf("%s +%d more", l, n.CollapsedCount)
 		}
 	}
 	if n.BodyChanged {
@@ -161,11 +206,71 @@ func Label(n filter.Node) string {
 	return l
 }
 
-func shortPkg(p string) string {
-	if i := strings.LastIndexByte(p, '/'); i >= 0 {
-		return p[i+1:]
+func shortPkg(p string) string { return suffix(p, 1) }
+
+// suffix returns the last n path segments of p.
+func suffix(p string, n int) string {
+	parts := strings.Split(p, "/")
+	if n >= len(parts) {
+		return p
 	}
-	return p
+	return strings.Join(parts[len(parts)-n:], "/")
+}
+
+func pickName(names map[string]string, pkg string) string {
+	if l, ok := names[graph.PkgID(pkg)]; ok {
+		return l
+	}
+	if l, ok := names[pkg]; ok {
+		return l
+	}
+	return shortPkg(pkg)
+}
+
+// shortNames gives every package drawn in dg — as a node or as a subgraph —
+// the shortest trailing path that is unique within the diagram. Two packages
+// called `pipelines` under different parents were both drawn as "pipelines",
+// which reads as one box duplicated rather than two different packages.
+// Keyed by both the pkg: ID and the bare import path, since subgraphs are
+// listed as IDs and nodes carry the path.
+func shortNames(dg *filter.Diagram) map[string]string {
+	paths := map[string]bool{}
+	for _, n := range dg.Nodes {
+		if n.Package != "" && (n.Kind == filter.KindPackage || n.Kind == filter.KindMore) {
+			paths[n.Package] = true
+		}
+	}
+	for _, id := range dg.Subgraphs {
+		paths[strings.TrimPrefix(id, "pkg:")] = true
+	}
+	all := make([]string, 0, len(paths))
+	for p := range paths {
+		all = append(all, p)
+	}
+	sort.Strings(all)
+	out := map[string]string{}
+	for _, p := range all {
+		depth := 1
+		for {
+			label := suffix(p, depth)
+			clash := false
+			for _, q := range all {
+				if q != p && suffix(q, depth) == label {
+					clash = true
+					break
+				}
+			}
+			// Stop widening when the whole path is on show: two distinct
+			// packages cannot share one, so this always terminates.
+			if !clash || label == p {
+				out[p] = label
+				out[graph.PkgID(p)] = label
+				break
+			}
+			depth++
+		}
+	}
+	return out
 }
 
 func esc(s string) string {

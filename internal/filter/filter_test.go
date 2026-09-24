@@ -217,6 +217,36 @@ func TestBudgetStepC(t *testing.T) {
 func TestBudgetStepD(t *testing.T) {
 	const p = "acme/svc/p"
 	g := newGB().pkg(p)
+	root := g.sym(p, "Root", "func")
+	var adds []string
+	for i := 0; i < 5; i++ {
+		id := g.sym(p, fmt.Sprintf("New%d", i), "func")
+		adds = append(adds, id)
+		g.call(root, id)
+	}
+	head := g.index()
+	d := newDelta()
+	d.Nodes.Added = adds
+	for _, id := range adds {
+		d.Edges.Added = append(d.Edges.Added, edge(root, id))
+	}
+	d.Canonicalize()
+	dg := Apply(d, head, head, Options{Budget: Budget{Chars: 0, Nodes: 2, Edges: 10, NarrowTargets: 2}}).CallPaths[0]
+	n := dg.NodeByID("more:" + p + ":added")
+	if n == nil || n.CollapsedCount != 5 || n.Label != "p +5 more" || n.Status != StatusAdded {
+		t.Fatalf("step d: %v %+v", nodeIDs(&dg), n)
+	}
+	if len(dg.Nodes) != 2 { // the caller and the group
+		t.Errorf("nodes = %v", nodeIDs(&dg))
+	}
+}
+
+// Step 4g: nodes with no drawn edge are not drawn. Five added functions that
+// nothing calls have no call paths, so there is no call-path diagram at all —
+// but every one of them keeps a row in the note's details table.
+func TestPruneOrphans(t *testing.T) {
+	const p = "acme/svc/p"
+	g := newGB().pkg(p)
 	var adds []string
 	for i := 0; i < 5; i++ {
 		adds = append(adds, g.sym(p, fmt.Sprintf("New%d", i), "func"))
@@ -225,13 +255,44 @@ func TestBudgetStepD(t *testing.T) {
 	d := newDelta()
 	d.Nodes.Added = adds
 	d.Canonicalize()
-	dg := Apply(d, head, head, Options{Budget: Budget{Chars: 0, Nodes: 2, Edges: 10, NarrowTargets: 2}}).CallPaths[0]
-	n := dg.NodeByID("more:" + p + ":added")
-	if n == nil || n.CollapsedCount != 5 || n.Label != "5 symbols" || n.Status != StatusAdded {
-		t.Fatalf("step d: %v %+v", nodeIDs(&dg), n)
+	res := Apply(d, head, head, Options{Budget: defaultBudget()})
+	if len(res.CallPaths) != 0 {
+		t.Fatalf("call paths = %v, want none", res.CallPaths)
 	}
-	if len(dg.Nodes) != 1 {
-		t.Errorf("nodes = %v", nodeIDs(&dg))
+	if len(res.Omitted.Orphans) != 5 {
+		t.Fatalf("orphans = %+v", res.Omitted.Orphans)
+	}
+	for i, n := range res.Omitted.Orphans {
+		if n.ID != adds[i] || n.Status != StatusAdded || n.File == "" {
+			t.Errorf("orphan %d = %+v", i, n)
+		}
+	}
+}
+
+// An orphan must not cost budget that the connected part of the graph needs:
+// the prune runs before step 4, so the drawn path survives intact.
+func TestPruneOrphansRunsBeforeBudget(t *testing.T) {
+	const p = "acme/svc/p"
+	g := newGB().pkg(p)
+	a := g.sym(p, "A", "func")
+	b := g.sym(p, "B", "func")
+	g.call(a, b)
+	var loose []string
+	for i := 0; i < 10; i++ {
+		loose = append(loose, g.sym(p, fmt.Sprintf("Loose%d", i), "func"))
+	}
+	head := g.index()
+	d := newDelta()
+	d.Nodes.Added = append([]string{b}, loose...)
+	d.Edges.Added = []graph.Edge{edge(a, b)}
+	d.Canonicalize()
+	res := Apply(d, head, head, Options{Budget: Budget{Chars: 0, Nodes: 4, Edges: 10, NarrowTargets: 2}})
+	dg := res.CallPaths[0]
+	if len(dg.Nodes) != 2 || !has(&dg, a) || !has(&dg, b) {
+		t.Fatalf("nodes = %v, want just the drawn path", nodeIDs(&dg))
+	}
+	if len(res.Omitted.Orphans) != 10 {
+		t.Errorf("orphans = %d, want 10", len(res.Omitted.Orphans))
 	}
 }
 
@@ -249,12 +310,15 @@ func TestSplitAndTerminal(t *testing.T) {
 		g.call(h1, a).call(h2, b)
 		under1, under2 = append(under1, a), append(under2, b)
 	}
-	g.pkg("acme/svc/other")
+	g.pkg("acme/svc/other").pkg("acme/svc/other2")
 	orphan := g.sym("acme/svc/other", "Orphan", "func")
+	stranded := g.sym("acme/svc/other2", "Stranded", "func")
+	g.call(orphan, stranded) // a pair off every entrypoint's route, not orphans
 	head := g.index()
 	d := newDelta()
 	d.Nodes.SignatureChanged = []delta.SignatureChange{{ID: h1}, {ID: h2}}
-	d.Nodes.Added = append(append(append([]string{}, under1...), under2...), orphan)
+	d.Nodes.Added = append(append(append([]string{}, under1...), under2...), orphan, stranded)
+	d.Edges.Added = []graph.Edge{edge(orphan, stranded)}
 	d.Entrypoints = []delta.Entrypoint{
 		{ID: e1, Status: "reach_changed", ChangedPaths: [][]string{{e1, h1, under1[0]}}},
 		{ID: e2, Status: "reach_changed", ChangedPaths: [][]string{{e2, h2, under2[0]}}},
@@ -283,8 +347,14 @@ func TestTerminalRule(t *testing.T) {
 	const p = "acme/svc/p"
 	g := newGB().pkg(p)
 	var sigs []delta.SignatureChange
+	var prev string
 	for i := 0; i < 12; i++ {
-		sigs = append(sigs, delta.SignatureChange{ID: g.sym(p, fmt.Sprintf("S%02d", i), "func")})
+		id := g.sym(p, fmt.Sprintf("S%02d", i), "func")
+		if prev != "" {
+			g.call(prev, id) // a chain: these are on paths, not orphans
+		}
+		prev = id
+		sigs = append(sigs, delta.SignatureChange{ID: id})
 	}
 	head := g.index()
 	d := newDelta()
@@ -419,5 +489,218 @@ func TestExcludedEndpointRepointed(t *testing.T) {
 	}
 	if len(dg.Subgraphs) != 1 || dg.Subgraphs[0] != "pkg:acme/svc/p" {
 		t.Errorf("subgraphs = %v (gen has a pkg node, so no subgraph)", dg.Subgraphs)
+	}
+}
+
+// Step 6 must leave test packages out even when the extractor sets no attrs
+// on the package node — the Go extractor builds them bare, and an external
+// test package is a package of its own there.
+func TestWiringExcludesTestPackages(t *testing.T) {
+	const p, q, pt = "acme/svc/p", "acme/svc/q", "acme/svc/p_test"
+	g := newGB().pkg(p).pkg(q).pkg(pt)
+	g.sym(p, "A", "func")
+	g.sym(q, "B", "func")
+	g.testSym(pt, "TestA")
+	g.imports(q, p)
+	head := g.index()
+	d := newDelta()
+	d.Packages.Added = []string{graph.PkgID(pt)}
+	d.Packages.ImportsAdded = []delta.ImportEdge{{From: graph.PkgID(q), To: graph.PkgID(p)}}
+	d.Canonicalize()
+	res := Apply(d, head, head, Options{Budget: defaultBudget()})
+	if res.Wiring == nil {
+		t.Fatal("wiring must still be drawn")
+	}
+	if has(res.Wiring, graph.PkgID(pt)) {
+		t.Errorf("test package drawn: %v", nodeIDs(res.Wiring))
+	}
+	if !has(res.Wiring, graph.PkgID(p)) || !has(res.Wiring, graph.PkgID(q)) {
+		t.Errorf("real packages missing: %v", nodeIDs(res.Wiring))
+	}
+	if res.Omitted.ExcludedTestPackages != 1 {
+		t.Errorf("excluded test packages = %d, want 1", res.Omitted.ExcludedTestPackages)
+	}
+}
+
+// A package the MR added is what step 6 exists to show, so the orphan rule
+// must not take it just because no import to it was drawn.
+func TestWiringKeepsAddedPackage(t *testing.T) {
+	const p = "acme/svc/new"
+	g := newGB().pkg(p)
+	g.sym(p, "A", "func")
+	head := g.index()
+	d := newDelta()
+	d.Packages.Added = []string{graph.PkgID(p)}
+	d.Canonicalize()
+	res := Apply(d, head, head, Options{Budget: defaultBudget()})
+	if res.Wiring == nil || !has(res.Wiring, graph.PkgID(p)) {
+		t.Fatalf("added package must be drawn: %+v", res.Wiring)
+	}
+}
+
+// The wiring diagram is budgeted, and must commit what it reduced rather
+// than leaving the unreduced diagram in place when it runs out of room.
+func TestWiringBudget(t *testing.T) {
+	g := newGB()
+	var pkgs []string
+	for i := 0; i < 20; i++ {
+		path := fmt.Sprintf("acme/svc/p%02d", i)
+		g.pkg(path)
+		g.sym(path, "A", "func")
+		pkgs = append(pkgs, graph.PkgID(path))
+	}
+	for i := 1; i < 20; i++ {
+		g.imports(fmt.Sprintf("acme/svc/p%02d", i), "acme/svc/p00")
+	}
+	head := g.index()
+	d := newDelta()
+	d.Packages.Added = pkgs
+	for i := 1; i < 20; i++ {
+		d.Packages.ImportsAdded = append(d.Packages.ImportsAdded, delta.ImportEdge{From: pkgs[i], To: pkgs[0]})
+	}
+	d.Canonicalize()
+	measure := func(dg *Diagram) int { return 50 * len(dg.Nodes) }
+	res := Apply(d, head, head, Options{Budget: Budget{Chars: 300, Nodes: 24, Edges: 36, NarrowTargets: 2}, Measure: measure})
+	if res.Wiring == nil {
+		t.Fatal("wiring missing")
+	}
+	if got := measure(res.Wiring); got > 300 {
+		t.Errorf("wiring left at %d chars against a budget of 300: %d nodes", got, len(res.Wiring.Nodes))
+	}
+}
+
+// Nothing is dropped silently (step 4g): when the terminal rule strands every
+// node it kept, the diagram goes but its counts do not.
+func TestPrunedDiagramStillAccountsForEveryNode(t *testing.T) {
+	const p = "acme/svc/p"
+	g := newGB().pkg(p)
+	hub := g.sym(p, "Hub", "func")
+	var sigs []delta.SignatureChange
+	for i := 0; i < 12; i++ {
+		id := g.sym(p, fmt.Sprintf("S%02d", i), "func")
+		g.call(hub, id)
+		sigs = append(sigs, delta.SignatureChange{ID: id})
+	}
+	head := g.index()
+	d := newDelta()
+	d.Nodes.SignatureChanged = sigs
+	d.Canonicalize()
+	res := Apply(d, head, head, Options{Budget: Budget{Chars: 0, Nodes: 8, Edges: 100, NarrowTargets: 2}})
+	if len(res.CallPaths) != 0 {
+		t.Fatalf("diagram kept with no edges: %v", nodeIDs(&res.CallPaths[0]))
+	}
+	if got := len(res.Omitted.Orphans) + res.Omitted.HiddenNodes; got != 13 {
+		t.Errorf("accounted for %d of 13 nodes (orphans %d, hidden %d)", got, len(res.Omitted.Orphans), res.Omitted.HiddenNodes)
+	}
+}
+
+// A step-4d group that strands itself hands back the definitions it hid, so
+// they are rows in the details table rather than a count pointing nowhere.
+func TestPrunedGroupKeepsItsRows(t *testing.T) {
+	const p = "acme/svc/p"
+	g := newGB().pkg(p)
+	a := g.sym(p, "A", "func")
+	b := g.sym(p, "B", "func")
+	c := g.sym(p, "C", "func")
+	g.call(a, b).call(b, c)
+	head := g.index()
+	d := newDelta()
+	d.Nodes.Added = []string{a, b, c}
+	d.Edges.Added = []graph.Edge{edge(a, b), edge(b, c)}
+	d.Canonicalize()
+	res := Apply(d, head, head, Options{Budget: Budget{Chars: 0, Nodes: 2, Edges: 100, NarrowTargets: 2}})
+	var got []string
+	for _, n := range res.Omitted.Orphans {
+		got = append(got, n.ID)
+	}
+	if !reflect.DeepEqual(got, []string{a, b, c}) {
+		t.Errorf("rows = %v, want the three collapsed definitions", got)
+	}
+}
+
+// Step 4a strands nodes too, and they must be recorded like any other orphan.
+func TestNodeStrandedByStepAIsRecorded(t *testing.T) {
+	const p = "acme/svc/p"
+	g := newGB().pkg(p)
+	a := g.sym(p, "A", "func")
+	x := g.sym(p, "X", "func")
+	y := g.sym(p, "Y", "func")
+	g.inferred(x, a)
+	g.call(y, a)
+	head := g.index()
+	d := newDelta()
+	d.Nodes.Added = []string{a}
+	d.Canonicalize()
+	res := Apply(d, head, head, Options{Budget: Budget{Chars: 0, Nodes: 2, Edges: 100, NarrowTargets: 2}})
+	if len(res.CallPaths) != 1 || !has(&res.CallPaths[0], a) || !has(&res.CallPaths[0], y) {
+		t.Fatalf("drawn = %v", nodeIDs(&res.CallPaths[0]))
+	}
+	if len(res.Omitted.Orphans) != 1 || res.Omitted.Orphans[0].ID != x {
+		t.Errorf("orphans = %+v, want the node the inferred edge stranded", res.Omitted.Orphans)
+	}
+}
+
+// The terminal rule inside budgetWiring must keep the package the MR added
+// over untouched ones that merely sort earlier, and the orphan rule must not
+// take it afterwards for having no drawn import.
+func TestWiringBudgetKeepsAddedPackage(t *testing.T) {
+	g := newGB()
+	var body []string
+	for i := 0; i < 20; i++ {
+		path := fmt.Sprintf("acme/svc/a%02d", i)
+		g.pkg(path)
+		body = append(body, g.sym(path, "S", "func"))
+		if i > 0 {
+			g.imports(path, "acme/svc/a00")
+		}
+	}
+	const added = "acme/svc/zzz" // sorts last: ID order alone would drop it
+	g.pkg(added)
+	g.sym(added, "New", "func")
+	head := g.index()
+	d := newDelta()
+	d.Nodes.BodyChanged = body
+	d.Packages.Added = []string{graph.PkgID(added)}
+	d.Canonicalize()
+	res := Apply(d, head, head, Options{Budget: Budget{Chars: 0, Nodes: 8, Edges: 100, NarrowTargets: 2}})
+	if res.Wiring == nil {
+		t.Fatal("wiring missing")
+	}
+	if !has(res.Wiring, graph.PkgID(added)) {
+		t.Errorf("the added package was budgeted away: %v", nodeIDs(res.Wiring))
+	}
+	for _, n := range res.Wiring.Nodes {
+		if n.ID == hiddenMoreID {
+			continue
+		}
+		var deg int
+		for _, e := range res.Wiring.Edges {
+			if e.From == n.ID || e.To == n.ID {
+				deg++
+			}
+		}
+		if deg == 0 && n.ID != graph.PkgID(added) {
+			t.Errorf("package %s left stranded by the wiring terminal rule", n.ID)
+		}
+	}
+}
+
+// Definitions handed back from a pruned group are rows; they must not also
+// still be counted as collapsed, or the footer reports them twice.
+func TestPrunedGroupIsNotDoubleCounted(t *testing.T) {
+	const p = "acme/svc/p"
+	g := newGB().pkg(p)
+	a := g.sym(p, "A", "func")
+	b := g.sym(p, "B", "func")
+	c := g.sym(p, "C", "func")
+	g.call(a, b).call(b, c)
+	head := g.index()
+	d := newDelta()
+	d.Nodes.Added = []string{a, b, c}
+	d.Edges.Added = []graph.Edge{edge(a, b), edge(b, c)}
+	d.Canonicalize()
+	res := Apply(d, head, head, Options{Budget: Budget{Chars: 0, Nodes: 2, Edges: 100, NarrowTargets: 2}})
+	if got := len(res.Omitted.Orphans) + res.Omitted.CollapsedSymbols; got != 3 {
+		t.Errorf("3 definitions reported as %d (orphans %d, collapsed %d)", got, len(res.Omitted.Orphans), res.Omitted.CollapsedSymbols)
 	}
 }

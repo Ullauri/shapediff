@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/Ullauri/shapediff/internal/cache"
 	"github.com/Ullauri/shapediff/internal/config"
+	"github.com/Ullauri/shapediff/internal/conform"
 	"github.com/Ullauri/shapediff/internal/delta"
 	"github.com/Ullauri/shapediff/internal/gitlab"
 	"github.com/Ullauri/shapediff/internal/goextract"
@@ -59,6 +61,24 @@ func projectOf(env pipeline.Env) gitlab.Project {
 func extractFn(cfg *config.Config, repo string) func(ctx context.Context, repoDir, sha string) (*graph.Document, error) {
 	return func(ctx context.Context, repoDir, sha string) (*graph.Document, error) {
 		return goextract.ExtractAll(ctx, goextract.Options{RepoDir: repoDir, Repo: repo, SHA: sha, Version: Version, Config: cfg})
+	}
+}
+
+// pluginExtractFn drives an external extractor over the plug-in contract of
+// section 6.3, the same seam the extract and conform commands use.
+func pluginExtractFn(exe string) func(ctx context.Context, repoDir, sha string) (*graph.Document, error) {
+	return func(ctx context.Context, repoDir, sha string) (*graph.Document, error) {
+		// The config comes from the worktree being extracted, not the
+		// checkout: weeklyGraph hands this an older sha, and that sha's own
+		// .shapediff.yml is the one that described it.
+		doc, err := conform.Exe{Path: exe}.Extract(ctx, repoDir, filepath.Join(repoDir, config.FileName))
+		if err != nil {
+			return nil, err
+		}
+		if probs := graph.Validate(doc); len(probs) > 0 {
+			return nil, fmt.Errorf("external extractor output violates the schema:\n  %s", strings.Join(probs, "\n  "))
+		}
+		return doc, nil
 	}
 }
 
@@ -146,6 +166,8 @@ type weeklyDepsT struct {
 	Extract     func(ctx context.Context, repoDir, sha string) (*graph.Document, error)
 	Delta       func(base, head *graph.Document) (*delta.Delta, error)
 	KeyParts    pipeline.KeyParts
+	// Cleanup, when set, is called once the run is over.
+	Cleanup func()
 }
 
 // weeklyReposFile is the YAML the weekly job reads.
@@ -222,4 +244,86 @@ func slugFor(repos []weeklyRepo, dir string) string {
 		}
 	}
 	return filepath.Base(dir)
+}
+
+// weeklyLocalDeps builds the weekly job for one local checkout, with no repos
+// file, no GitLab and no wiki. It is what makes the brief of section 14.2
+// runnable by a developer who is behind on a repo rather than only by the
+// scheduled job — see the reader named in section 2.
+//
+// The graph cache is deliberately a fresh temporary directory. The cache key
+// of section 14.1 covers the extractor version and toolchain, and neither is
+// known before the first extraction when the extractor is a plug-in; a local
+// run is two extractions of a few hundred milliseconds, so there is nothing
+// to gain by risking a stale hit against a different interpreter.
+func weeklyLocalDeps(repoDir, branch, extractor string) (weeklyDepsT, error) {
+	dir, err := filepath.Abs(repoDir)
+	if err != nil {
+		return weeklyDepsT{}, err
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		return weeklyDepsT{}, fmt.Errorf("%s is not a git checkout", dir)
+	}
+	if branch == "" {
+		branch, err = gitBranch(dir)
+		if err != nil {
+			return weeklyDepsT{}, err
+		}
+	}
+	cfg, err := config.LoadRepo(dir)
+	if err != nil {
+		cfg = config.Default()
+	}
+	slug := repoSlug(dir)
+	tmp, err := os.MkdirTemp("", "shapediff-weekly-")
+	if err != nil {
+		return weeklyDepsT{}, err
+	}
+	store := cache.Dir{Path: tmp}
+	wd := weeklyDepsT{
+		Repos:  []weeklyRepo{{Slug: slug, Dir: dir, Branch: branch}},
+		Graphs: store,
+		Deltas: store,
+		// Neither the temp directory nor the checkout: weeklyRepoWeek writes
+		// the diagram SVG here and tells the reader to go and find it, so it
+		// has to outlive the run — but shapediff has no standing to leave an
+		// untracked directory in someone else's repo.
+		LayoutDir: localLayoutDir(slug),
+		Delta:     deltaFn(cfg, "", 0),
+		KeyParts:  keyParts(context.Background(), cfg, dir),
+		Cleanup:   func() { os.RemoveAll(tmp) },
+	}
+	if extractor != "" {
+		wd.Extract = pluginExtractFn(extractor)
+	} else {
+		wd.Extract = extractFn(cfg, slug)
+	}
+	return wd, nil
+}
+
+// gitBranch is the checkout's current branch. It does not guess: defaulting
+// to "main" on a detached HEAD gave a silent "not reported this week" and a
+// zero exit on a repo whose branch is called something else.
+func gitBranch(dir string) (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	cmd.Dir = dir
+	b, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve the current branch of %s; pass --branch: %w", dir, err)
+	}
+	s := strings.TrimSpace(string(b))
+	if s == "" || s == "HEAD" {
+		return "", fmt.Errorf("%s is on a detached HEAD; pass --branch", dir)
+	}
+	return s, nil
+}
+
+// localLayoutDir is where a local brief keeps pinned layout positions and the
+// diagram SVG, under the user's cache directory rather than the target repo.
+func localLayoutDir(slug string) string {
+	base, err := os.UserCacheDir()
+	if err != nil {
+		base = os.TempDir()
+	}
+	return filepath.Join(base, "shapediff", "layouts", strings.ReplaceAll(slug, "/", "__"))
 }

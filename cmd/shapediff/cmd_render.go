@@ -57,7 +57,7 @@ func renderNote(d *delta.Delta, head, base *graph.Index, cfg *config.Config, pro
 	note, err := render.Note(render.NoteInput{
 		Delta: d, Head: head, Base: base, Filter: res, Baseline: bl,
 		Headline: narrate.Headline(d), Suppression: narrate.SuppressionLine(d), Sentences: texts,
-		ProjectURL: projectURL, HeadSHA: d.HeadSHA, BaseSHA: d.BaseSHA, MRIID: d.MRIID,
+		ProjectURL: projectURL, WeeklyURL: cfg.WeeklyURL, HeadSHA: d.HeadSHA, BaseSHA: d.BaseSHA, MRIID: d.MRIID,
 		Extractor: head.Doc.Extractor, Elapsed: time.Since(started),
 	})
 	return note, res, warnings, err
@@ -70,6 +70,7 @@ func runRender(args []string) error {
 	basePath := fs.String("base", "", "base graph (required)")
 	cfgPath := fs.String("config", "", "repo config (.shapediff.yml); defaults when absent")
 	projectURL := fs.String("project-url", "", "project web URL for permalinks")
+	weeklyURL := fs.String("weekly-url", "", "URL of the weekly structure brief; overrides weekly_url in the config")
 	mrIID := fs.Int("mr-iid", 0, "merge request iid to record in the note")
 	out := fs.String("o", "", "output file (default stdout)")
 	diagramOnly := fs.Bool("diagram-only", false, "print only the primary call-path Mermaid source")
@@ -98,6 +99,9 @@ func runRender(args []string) error {
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		return err
+	}
+	if *weeklyURL != "" {
+		cfg.WeeklyURL = *weeklyURL
 	}
 	head, base := graph.NewIndex(headDoc), graph.NewIndex(baseDoc)
 

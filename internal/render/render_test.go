@@ -204,6 +204,31 @@ func TestNoteGolden(t *testing.T) {
 	}
 }
 
+// The per-MR note answers "what did this MR change". A reader who is behind
+// on the repo needs the other cadence, so the note points at it when one is
+// configured — and says nothing at all when one is not.
+func TestWeeklyPointer(t *testing.T) {
+	in := NoteInput{Delta: &delta.Delta{SchemaVersion: 1}, Filter: &filter.Result{}, Headline: "x"}
+	got, err := Note(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "Behind on this repo") {
+		t.Error("no weekly_url configured: the note must not invent a pointer")
+	}
+	in.WeeklyURL = "https://gitlab.example.com/acme/structure/-/wikis/Structure"
+	got, err = Note(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Behind on this repo? The weekly structure brief covers what it has become: "+in.WeeklyURL) {
+		t.Errorf("weekly pointer missing:\n%s", got)
+	}
+	if strings.Index(got, "Behind on this repo") < strings.Index(got, "</details>") {
+		t.Error("the pointer belongs after the details block, not inside it")
+	}
+}
+
 // An edge can be both removed and inferred. CSS takes the last declaration,
 // so emitting a dash pattern for each meant the removed one was silently
 // dropped and the arrow read as an ordinary inferred call.

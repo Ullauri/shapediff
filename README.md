@@ -140,6 +140,11 @@ project. Both files document their variables.
   in a diagram takes the shortest trailing path unique within that diagram,
   so two packages called `pipelines` are not two boxes with one name. The
   weekly page's table still has the original form of this defect, below.
+- **`weekly --repo <dir>` (section 14.2)** runs the brief against one local
+  checkout with no repos file, no GitLab and no wiki, and takes
+  `--extractor` for a plug-in backend. It uses a fresh cache directory per
+  run, because the cache key covers a toolchain that is not known until the
+  first extraction when the extractor is a plug-in.
 - **Package registry cache** uses one package name (`shapediff`) with the
   cache key as the version, since the key already embeds the repo.
 - **Weekly page, known cosmetic defect:** the "Where change concentrated"

@@ -88,8 +88,13 @@ func repoSlug(dir string) string {
 	if err == nil {
 		u := strings.TrimSpace(string(b))
 		u = strings.TrimSuffix(u, ".git")
-		if i := strings.LastIndex(u, ":"); i >= 0 && !strings.Contains(u[i:], "/") {
-			u = u[i+1:]
+		// scp-like remotes (git@host:group/name, desktop:Projects/name) carry
+		// the host before a colon, and it is not part of the slug. Guarded on
+		// "://" so a port in a real URL is left alone.
+		if !strings.Contains(u, "://") {
+			if i := strings.LastIndex(u, ":"); i >= 0 {
+				u = u[i+1:]
+			}
 		}
 		parts := strings.Split(strings.Trim(u, "/"), "/")
 		if len(parts) >= 2 {

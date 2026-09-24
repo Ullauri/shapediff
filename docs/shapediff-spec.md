@@ -40,6 +40,17 @@ Make structural change legible, fast, at two cadences.
   of where change concentrated and how the structure drifted over the week.
   Not a stack of per-MR diagrams.
 
+The two cadences answer two different questions, and the second reader is
+easy to lose sight of. The per-MR reader asks **"what did this MR change"**
+and is oriented by the unchanged callers drawn in grey around the change.
+The weekly reader asks **"what has this repo become"** — they did not watch
+the last ten MRs and are catching up, not reviewing. That reader is served
+by the weekly brief, not by making the per-MR note longer: the orientation
+cost is paid once a week instead of once an MR, and the per-MR note stays
+short enough to be read before the diff. A per-MR note whose repo has a
+published brief ends with one line pointing at it (`weekly_url`, section
+13), and the brief can be produced for a single local checkout as well as by
+the scheduled job (section 14.2).
 
 A short prose summary accompanies the diagrams. The prose is **rendered by
 template from the same structured delta the diagrams are drawn from**, so
@@ -1117,6 +1128,13 @@ and every edit would otherwise invalidate every cached graph for the repo
 is one re-extraction, and one hashing rule was simpler. That trade does not
 hold for a key that is edited repeatedly.
 
+`weekly_url` is the address of the weekly structure brief (section 14.2). It
+is optional and purely a pointer: when set, the per-MR note ends with one
+line offering it to a reader who is behind on the repo. It takes part in
+`extractor.config_hash` like every other key, so setting or changing it
+invalidates that repo's cached graphs once. It is marshalled `omitempty`, so
+a repo that does not set it keeps the hash it had.
+
 ## 14. GitLab integration
 
 ### 14.1 Per MR
@@ -1184,6 +1202,18 @@ in one line (only if a note already exists; otherwise the artifact carries
 it) and exit 0. The job must never block a pipeline.
 
 ### 14.2 Weekly
+
+The brief also runs against one local checkout, with no repos file, no
+GitLab and no wiki: `shapediff weekly --repo <dir> [--extractor <exe>]
+[--branch <name>] [--week YYYY-MM-DD]` prints the same markdown. That is the
+form the catching-up reader of section 2 can run for themselves, and it
+takes the plug-in extractor of section 6.3, so it is not limited to Go. It
+uses a fresh cache directory per run: the cache key of section 14.1 covers
+the extractor version and toolchain, and neither is known before the first
+extraction when the extractor is a plug-in.
+
+A scheduled pipeline in a central "structure" project, Monday 06:00,
+**enabled only after phase 3 has passed on at least one repo**:
 
 - For each configured repo: weekly delta (section 8.3), attribution from
   cached per-MR deltas, pinned-layout diagram with the resolved SHAs
@@ -1525,3 +1555,23 @@ could fix. The MRs were re-rendered before and after each change.
 The theme of the four above is that both defects came from a rule stated for
 one diagram and silently not inherited by another. The filter's steps are now
 written as rules over diagrams rather than steps in one pipeline.
+
+### Added in v0.4.2 (the catching-up reader, 2026-09-24)
+
+The same review asked for a note that helps a developer who has not watched
+the last ten MRs, not only one reviewing this MR. Section 2 now names that
+reader and says where they are served, which is the weekly brief and not a
+longer per-MR note — the orientation cost is paid once a week rather than
+once an MR. Two things follow:
+
+- **`weekly_url`** (section 13): when a repo has a published brief, the
+  per-MR note ends with one line offering it.
+- **`weekly --repo`** (section 14.2): the brief runs against a single local
+  checkout with no repos file, no GitLab and no wiki, and takes the plug-in
+  extractor of section 6.3, so the catching-up reader can produce it for
+  themselves in any language shapediff can extract.
+
+What was *not* done, deliberately: a note that explains the code or teaches
+the reader something the delta does not contain. Section 3 rules that out and
+section 11's validators enforce it, and that boundary is what keeps the note
+something a reviewer can trust without checking.

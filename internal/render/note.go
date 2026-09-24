@@ -26,11 +26,15 @@ type NoteInput struct {
 	Suppression string
 	Sentences   []string
 	ProjectURL  string // e.g. https://gitlab.example.com/group/svc, "" disables permalinks
-	HeadSHA     string
-	BaseSHA     string
-	MRIID       int
-	Extractor   graph.Extractor
-	Elapsed     time.Duration
+	// WeeklyURL is the weekly structure brief (section 14.2). When set, the
+	// note ends with a pointer to it, for the reader who is behind on the
+	// repo rather than only on this MR. "" prints nothing.
+	WeeklyURL string
+	HeadSHA   string
+	BaseSHA   string
+	MRIID     int
+	Extractor graph.Extractor
+	Elapsed   time.Duration
 	// FallbackText is shown in place of a diagram that fell back to SVG,
 	// e.g. a link to the uploaded attachment; when empty a generic line is
 	// printed.
@@ -101,6 +105,9 @@ func Note(in NoteInput) (string, error) {
 	writeLists(&b, in)
 	fmt.Fprintf(&b, "\nextractor %s %s (%s, %s), base %s, head %s, %s\n", in.Extractor.Name, in.Extractor.Version, in.Extractor.Precision, in.Extractor.Toolchain, short(in.BaseSHA), short(in.HeadSHA), in.Elapsed.Round(time.Millisecond))
 	b.WriteString("</details>\n")
+	if in.WeeklyURL != "" {
+		fmt.Fprintf(&b, "\nBehind on this repo? The weekly structure brief covers what it has become: %s\n", in.WeeklyURL)
+	}
 	return b.String(), nil
 }
 

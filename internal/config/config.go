@@ -30,6 +30,11 @@ type Config struct {
 	// on (default) or off.
 	Baseline string `yaml:"baseline"`
 	LLM      LLM    `yaml:"llm"`
+	// WeeklyURL points a reader who is behind on the repo at the weekly
+	// structure brief (section 14.2). The per-MR note answers "what did this
+	// MR change"; the brief answers "what has this repo become", which is a
+	// different question and a different cadence.
+	WeeklyURL string `yaml:"weekly_url,omitempty"`
 }
 
 // EntryPattern is a configured entry point registration: a call to a

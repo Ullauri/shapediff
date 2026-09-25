@@ -26,11 +26,15 @@ type NoteInput struct {
 	Suppression string
 	Sentences   []string
 	ProjectURL  string // e.g. https://gitlab.example.com/group/svc, "" disables permalinks
-	HeadSHA     string
-	BaseSHA     string
-	MRIID       int
-	Extractor   graph.Extractor
-	Elapsed     time.Duration
+	// WeeklyURL is the weekly structure brief (section 14.2). When set, the
+	// note ends with a pointer to it, for the reader who is behind on the
+	// repo rather than only on this MR. "" prints nothing.
+	WeeklyURL string
+	HeadSHA   string
+	BaseSHA   string
+	MRIID     int
+	Extractor graph.Extractor
+	Elapsed   time.Duration
 	// FallbackText is shown in place of a diagram that fell back to SVG,
 	// e.g. a link to the uploaded attachment; when empty a generic line is
 	// printed.
@@ -60,6 +64,12 @@ func Note(in NoteInput) (string, error) {
 	if in.Baseline != nil && (in.Baseline.Map != nil || len(in.Baseline.Touched) > 0) {
 		writeBaseline(&b, in)
 	}
+	// One key, above the first diagram. Under the call paths it was invisible
+	// to a reader of the dataflow diagram, and repeating it per diagram turns
+	// it into the kind of chrome section 11 warns reviewers learn to skip.
+	if in.Filter.Dataflow != nil || len(in.Filter.CallPaths) > 0 || in.Filter.Wiring != nil {
+		fmt.Fprintf(&b, "\n%s\n", Legend)
+	}
 	if in.Filter.Dataflow != nil {
 		b.WriteString("\n#### Dataflow\n\n")
 		fence(&b, Mermaid(in.Filter.Dataflow))
@@ -75,7 +85,6 @@ func Note(in NoteInput) (string, error) {
 			}
 		} else {
 			fence(&b, Mermaid(&primary))
-			b.WriteString(Legend + "\n")
 		}
 		if rest := in.Filter.CallPaths[1:]; len(rest) > 0 {
 			fmt.Fprintf(&b, "\n<details><summary>%d more call-path %s</summary>\n\n", len(rest), plural(len(rest), "diagram", "diagrams"))
@@ -96,6 +105,9 @@ func Note(in NoteInput) (string, error) {
 	writeLists(&b, in)
 	fmt.Fprintf(&b, "\nextractor %s %s (%s, %s), base %s, head %s, %s\n", in.Extractor.Name, in.Extractor.Version, in.Extractor.Precision, in.Extractor.Toolchain, short(in.BaseSHA), short(in.HeadSHA), in.Elapsed.Round(time.Millisecond))
 	b.WriteString("</details>\n")
+	if in.WeeklyURL != "" {
+		fmt.Fprintf(&b, "\nBehind on this repo? The weekly structure brief covers what it has become: %s\n", in.WeeklyURL)
+	}
 	return b.String(), nil
 }
 
@@ -242,6 +254,15 @@ func writeNodeTable(b *strings.Builder, in NoteInput) {
 			rows = append(rows, n)
 		}
 	}
+	// Nodes pruned for having no drawn edge are not in any diagram but still
+	// belong in the table: the row is where their permalink lives.
+	for _, n := range in.Filter.Omitted.Orphans {
+		if seen[n.ID] || n.Kind == filter.KindMore || n.Kind == filter.KindPackage {
+			continue
+		}
+		seen[n.ID] = true
+		rows = append(rows, n)
+	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
 	if len(rows) == 0 {
 		return
@@ -302,8 +323,8 @@ func writeLists(b *strings.Builder, in NoteInput) {
 		}
 	}
 	om := in.Filter.Omitted
-	if om.HiddenNodes+om.CollapsedSymbols+om.ExcludedGenerated+om.ExcludedTest > 0 {
-		fmt.Fprintf(b, "\n%d nodes hidden by the budget, %d symbols collapsed into packages, %d generated and %d test symbols not drawn.\n", om.HiddenNodes, om.CollapsedSymbols, om.ExcludedGenerated, om.ExcludedTest)
+	if om.HiddenNodes+om.CollapsedSymbols+om.ExcludedGenerated+om.ExcludedTest+om.ExcludedTestPackages+len(om.Orphans) > 0 {
+		fmt.Fprintf(b, "\n%d nodes hidden by the budget, %d on no drawn path, %d definitions collapsed into packages, %d generated and %d test definitions not drawn, %d test packages left out of the wiring.\n", om.HiddenNodes, len(om.Orphans), om.CollapsedSymbols, om.ExcludedGenerated, om.ExcludedTest, om.ExcludedTestPackages)
 	}
 	if len(d.Warnings) > 0 {
 		b.WriteString("\n**Warnings**\n\n")

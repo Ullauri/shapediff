@@ -43,12 +43,12 @@ func TestMermaid(t *testing.T) {
 		"subgraph sg",
 		`(["POST /orders"])`,
 		`[("orders")]`,
-		`[["util (3 symbols)"]]`,
+		`[["util +3 more"]]`,
 		`(*Service).Create* (+3 callers)`,
 		"-.->|3 targets|",
 		"stroke-dasharray:2 2",
 		"stroke:#16a34a",
-		"stroke:#dc2626",
+		"stroke:#dc2626,stroke-width:2px,stroke-dasharray:5 3", // removed edges dash, not colour alone
 		"class n",
 		" added\n",
 		" signature_changed\n",
@@ -72,6 +72,30 @@ func TestMermaid(t *testing.T) {
 	}
 	if Mermaid(sample()) != src {
 		t.Error("not deterministic")
+	}
+}
+
+// Two packages whose last path segment is the same must not draw as the same
+// label: the reader cannot tell one box from the other.
+func TestShortNameCollision(t *testing.T) {
+	dg := &filter.Diagram{
+		Title: "call paths",
+		Nodes: []filter.Node{
+			{ID: "pkg:acme/svc/api/pipelines", Kind: filter.KindPackage, Status: filter.StatusContext, Package: "acme/svc/api/pipelines"},
+			{ID: "pkg:acme/svc/app/pipelines", Kind: filter.KindPackage, Status: filter.StatusAdded, Package: "acme/svc/app/pipelines"},
+			{ID: "pkg:acme/svc/orders", Kind: filter.KindPackage, Status: filter.StatusContext, Package: "acme/svc/orders"},
+		},
+		Edges: []filter.Edge{{From: "pkg:acme/svc/api/pipelines", To: "pkg:acme/svc/app/pipelines", Kind: "imports", Status: filter.EdgeAdded}},
+	}
+	src := Mermaid(dg)
+	for _, want := range []string{`[["api/pipelines"]]`, `[["app/pipelines"]]`, `[["orders"]]`} {
+		if !strings.Contains(src, want) {
+			t.Errorf("missing %q in:\n%s", want, src)
+		}
+	}
+	// the package that never collided keeps its short name
+	if strings.Contains(src, "svc/orders") {
+		t.Error("a package that does not collide must not be widened")
 	}
 }
 
@@ -145,7 +169,7 @@ func TestNoteGolden(t *testing.T) {
 		"| package | symbols | this MR | imported by | reached from | talks to |",
 		"| [`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders) | 12 | 1 added, 1 changed | `api`, `billing`, `cron`, `export`, +1 | `POST /orders` (new) | `db orders` |",
 		"| [`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util) | 3 | new package | `orders` | — | — |",
-		"classDef touched", `(["2 http routes"])`, BaselineLegend + " 4 untouched packages folded into their directory to fit.", "#### Dataflow", "#### Call paths", Legend, "<details><summary>1 more call-path diagram", "**GET /x**", "#### Module wiring", "<details><summary>Details", "| node | status |", "[orders/v.go:7](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7)", "[util/o.go:1](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1)", "**Renames**", "`Old` → `Older` ?", "**Body-only changes**", "**Wide-reach changes**", "**Suppressed packages**", "2 nodes hidden by the budget", "**Warnings**", "vta took 41s", "extractor go-xtools 0.1.0 (typed, go1.26.0), base aaaaaaaa, head bbbbbbbb, 1.234s"}
+		"classDef touched", `(["2 http routes"])`, BaselineLegend + " 4 untouched packages folded into their directory to fit.", Legend, "#### Dataflow", "#### Call paths", "<details><summary>1 more call-path diagram", "**GET /x**", "#### Module wiring", "<details><summary>Details", "| node | status |", "[orders/v.go:7](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7)", "[util/o.go:1](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1)", "**Renames**", "`Old` → `Older` ?", "**Body-only changes**", "**Wide-reach changes**", "**Suppressed packages**", "2 nodes hidden by the budget", "**Warnings**", "vta took 41s", "extractor go-xtools 0.1.0 (typed, go1.26.0), base aaaaaaaa, head bbbbbbbb, 1.234s"}
 	pos := 0
 	for _, o := range order {
 		i := strings.Index(got[pos:], o)
@@ -170,10 +194,104 @@ func TestNoteGolden(t *testing.T) {
 	// fallback path
 	res.Fallback = true
 	got, _ = Note(in)
-	if !strings.Contains(got, "attached SVG") || strings.Contains(got, Legend) {
+	// The key still prints, and the collapsed section still holds the second
+	// diagram; it is the primary that must not be embedded.
+	if !strings.Contains(got, "attached SVG") || strings.Contains(got, Mermaid(&res.CallPaths[0])) {
 		t.Error("fallback note should not embed the primary diagram")
 	}
 	if NoStructuralNote("bbbbbbbbbbbb") != Marker+"\nno structural change at bbbbbbbb\n" {
 		t.Error("no-structural note")
+	}
+}
+
+// The per-MR note answers "what did this MR change". A reader who is behind
+// on the repo needs the other cadence, so the note points at it when one is
+// configured — and says nothing at all when one is not.
+func TestWeeklyPointer(t *testing.T) {
+	in := NoteInput{Delta: &delta.Delta{SchemaVersion: 1}, Filter: &filter.Result{}, Headline: "x"}
+	got, err := Note(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "Behind on this repo") {
+		t.Error("no weekly_url configured: the note must not invent a pointer")
+	}
+	in.WeeklyURL = "https://gitlab.example.com/acme/structure/-/wikis/Structure"
+	got, err = Note(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Behind on this repo? The weekly structure brief covers what it has become: "+in.WeeklyURL) {
+		t.Errorf("weekly pointer missing:\n%s", got)
+	}
+	if strings.Index(got, "Behind on this repo") < strings.Index(got, "</details>") {
+		t.Error("the pointer belongs after the details block, not inside it")
+	}
+}
+
+// An edge can be both removed and inferred. CSS takes the last declaration,
+// so emitting a dash pattern for each meant the removed one was silently
+// dropped and the arrow read as an ordinary inferred call.
+func TestRemovedInferredEdgeHasOneDashPattern(t *testing.T) {
+	dg := &filter.Diagram{
+		Title: "call paths",
+		Nodes: []filter.Node{
+			{ID: "sym:a.A", Label: "A", Kind: filter.KindSymbol, Status: filter.StatusContext},
+			{ID: "sym:a.B", Label: "B", Kind: filter.KindSymbol, Status: filter.StatusRemoved},
+		},
+		Edges: []filter.Edge{{From: "sym:a.A", To: "sym:a.B", Kind: "calls", Inferred: true, Status: filter.EdgeRemoved}},
+	}
+	var line string
+	for _, l := range strings.Split(Mermaid(dg), "\n") {
+		if strings.Contains(l, "linkStyle") {
+			line = l
+		}
+	}
+	if n := strings.Count(line, "stroke-dasharray"); n != 1 {
+		t.Errorf("%d dash patterns on one edge: %q", n, line)
+	}
+	if !strings.Contains(line, "stroke:#dc2626") {
+		t.Errorf("removed edge lost its colour: %q", line)
+	}
+	if !strings.Contains(line, "stroke-dasharray:2 2") {
+		t.Errorf("inferred edge should keep the dotted pattern: %q", line)
+	}
+}
+
+// A collapsed group's label is baked by the filter from the last path
+// segment, which cannot know what it collides with in this diagram.
+func TestGroupLabelCollision(t *testing.T) {
+	dg := &filter.Diagram{
+		Title: "call paths",
+		Nodes: []filter.Node{
+			{ID: "more:acme/svc/api/pipelines:added", Label: "pipelines +2 more", Kind: filter.KindMore, Status: filter.StatusAdded, Package: "acme/svc/api/pipelines", CollapsedCount: 2},
+			{ID: "more:acme/svc/app/pipelines:added", Label: "pipelines +3 more", Kind: filter.KindMore, Status: filter.StatusAdded, Package: "acme/svc/app/pipelines", CollapsedCount: 3},
+		},
+		Edges: []filter.Edge{{From: "more:acme/svc/api/pipelines:added", To: "more:acme/svc/app/pipelines:added", Kind: "calls", Status: filter.EdgeAdded}},
+	}
+	src := Mermaid(dg)
+	for _, want := range []string{`"api/pipelines +2 more"`, `"app/pipelines +3 more"`} {
+		if !strings.Contains(src, want) {
+			t.Errorf("missing %s in:\n%s", want, src)
+		}
+	}
+}
+
+// The SVG fallback fires when the diagram is largest, which is when colliding
+// package names are likeliest; it must disambiguate them too.
+func TestDotDisambiguatesPackages(t *testing.T) {
+	dg := &filter.Diagram{
+		Title: "call paths",
+		Nodes: []filter.Node{
+			{ID: "pkg:acme/svc/api/pipelines", Kind: filter.KindPackage, Status: filter.StatusContext, Package: "acme/svc/api/pipelines"},
+			{ID: "pkg:acme/svc/app/pipelines", Kind: filter.KindPackage, Status: filter.StatusAdded, Package: "acme/svc/app/pipelines"},
+		},
+		Edges: []filter.Edge{{From: "pkg:acme/svc/api/pipelines", To: "pkg:acme/svc/app/pipelines", Kind: "imports", Status: filter.EdgeAdded}},
+	}
+	src := Dot(dg)
+	for _, want := range []string{`label="api/pipelines"`, `label="app/pipelines"`} {
+		if !strings.Contains(src, want) {
+			t.Errorf("missing %s in:\n%s", want, src)
+		}
 	}
 }

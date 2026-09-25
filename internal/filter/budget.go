@@ -34,6 +34,12 @@ func (b *builder) budget(w *work, allowSplit bool, res *Result) []*work {
 			return []*work{w}
 		}
 		if w.stepA() || w.stepB(b.opts.Budget.NarrowTargets) || w.stepC() || w.stepD() {
+			// A collapse merges edges and drops self loops, which can strand a
+			// node; take those out before spending another step.
+			b.prune(w)
+			continue
+		}
+		if b.prune(w) {
 			continue
 		}
 		if allowSplit {
@@ -50,34 +56,10 @@ func (b *builder) budget(w *work, allowSplit bool, res *Result) []*work {
 	}
 }
 
-// dropOrphans removes context nodes with no remaining edges after a drop.
-func (w *work) dropOrphans(before map[string]bool) bool {
-	deg := w.degree()
-	changed := false
-	for _, id := range w.sortedIDs() {
-		if before[id] && deg[id] == 0 && w.context[id] && !w.exempt[id] {
-			delete(w.nodes, id)
-			delete(w.context, id)
-			changed = true
-		}
-	}
-	return changed
-}
-
-func (w *work) connectedContext() map[string]bool {
-	m := map[string]bool{}
-	deg := w.degree()
-	for id := range w.context {
-		if deg[id] > 0 {
-			m[id] = true
-		}
-	}
-	return m
-}
-
-// stepA drops inferred edges and context nodes only reachable through them.
+// stepA drops inferred edges and the nodes left only reachable through them.
+// The prune is 4g's, so a node stranded here is recorded and gets a table row
+// like any other; it used to be deleted silently.
 func (w *work) stepA() bool {
-	before := w.connectedContext()
 	changed := false
 	for k, e := range w.edges {
 		if e.Inferred {
@@ -86,14 +68,13 @@ func (w *work) stepA() bool {
 		}
 	}
 	if changed {
-		w.dropOrphans(before)
+		w.b.prune(w)
 	}
 	return changed
 }
 
-// stepB drops edges wider than k and context nodes only reachable through them.
+// stepB drops edges wider than k and the nodes left only reachable through them.
 func (w *work) stepB(k int) bool {
-	before := w.connectedContext()
 	changed := false
 	for key, e := range w.edges {
 		if e.Dynamic && e.Targets > k {
@@ -102,7 +83,7 @@ func (w *work) stepB(k int) bool {
 		}
 	}
 	if changed {
-		w.dropOrphans(before)
+		w.b.prune(w)
 	}
 	return changed
 }
@@ -178,10 +159,13 @@ func (w *work) stepD() bool {
 	for _, id := range ids {
 		gn.CollapsedCount++
 		w.b.collapsedSymbols++
+		w.b.collapsedInto[gid] = append(w.b.collapsedInto[gid], rowCopy(w.nodes[id]))
 		delete(w.nodes, id)
 		w.rewireEdges(id, gid)
 	}
-	gn.Label = fmt.Sprintf("%d symbols", gn.CollapsedCount)
+	// Name the group after its package: "17 symbols" costs the same space as
+	// "..." and says as much.
+	gn.Label = fmt.Sprintf("%s +%d more", graph.ShortName(graph.PkgID(first.Package)), gn.CollapsedCount)
 	return true
 }
 
@@ -250,6 +234,9 @@ func (w *work) subset(title string, keep map[string]bool) *work {
 			if w.exempt[id] {
 				s.exempt[id] = true
 			}
+			if w.pinned[id] {
+				s.pinned[id] = true
+			}
 		}
 	}
 	for k, e := range w.edges {
@@ -291,13 +278,17 @@ func (b *builder) topB(w *work, B int) *work {
 	}
 	t := w.subset(w.title, keep)
 	if hidden := len(ids) - len(keep); hidden > 0 {
-		t.nodes["more:hidden"] = &Node{ID: "more:hidden", Kind: KindMore, Label: fmt.Sprintf("+%d more", hidden), Status: StatusContext, priority: prioContext}
+		t.nodes[hiddenMoreID] = &Node{ID: hiddenMoreID, Kind: KindMore, Label: fmt.Sprintf("+%d more", hidden), Status: StatusContext, priority: prioContext}
 		t.hidden = hidden
 	}
 	return t
 }
 
 func (b *builder) commit(w, t *work) {
+	// The hidden count is recorded on commit, not read back off the marker's
+	// label: a diagram can be pruned away afterwards, and the nodes it stood
+	// for must still be accounted for in the note.
+	b.hiddenNodes += t.hidden
 	w.nodes, w.edges, w.context, w.exempt, w.hidden = t.nodes, t.edges, t.context, t.exempt, t.hidden
 }
 
@@ -476,17 +467,34 @@ func (b *builder) reachNode(w *work, id string) {
 }
 
 // wiring is step 6: touched packages and their imports.
+//
+// Test and generated packages are left out. Step 1 excludes them from the
+// call-path focus set, but step 6 inherited no such rule, so a repo with a
+// test module per source module drew a wiring diagram that was mostly test
+// modules. Unlike the dataflow diagram of step 5, which is small by
+// construction, this one is not, so it is held to the same budget as the
+// call paths.
 func (b *builder) wiring() *Diagram {
 	pd := b.d.Packages
 	if len(pd.Added)+len(pd.Removed)+len(pd.ImportsAdded)+len(pd.ImportsRemoved) == 0 {
 		return nil
 	}
 	w := b.newWork("module wiring")
+	add := func(id string) *Node {
+		if b.excludedPkg(id) {
+			return nil
+		}
+		return w.addPkgNode(id)
+	}
 	for _, id := range pd.Added {
-		w.addPkgNode(id)
+		if n := add(id); n != nil {
+			w.pinned[id] = true
+		}
 	}
 	for _, id := range pd.Removed {
-		w.addPkgNode(id)
+		if n := add(id); n != nil {
+			w.pinned[id] = true
+		}
 	}
 	touched := make([]string, 0, len(b.touched))
 	for id := range b.touched {
@@ -494,18 +502,20 @@ func (b *builder) wiring() *Diagram {
 	}
 	sort.Strings(touched)
 	for _, id := range touched {
-		w.addPkgNode(id)
+		add(id)
 	}
-	imp := func(e struct{ From, To string }, status string) {
-		w.addPkgNode(e.From)
-		w.addPkgNode(e.To)
-		w.edges[edgeKey{e.From, e.To, graph.EdgeImports}] = &Edge{From: e.From, To: e.To, Kind: graph.EdgeImports, Status: status}
+	imp := func(from, to, status string) {
+		f, t := add(from), add(to) // both, always: add counts what it refuses
+		if f == nil || t == nil {
+			return
+		}
+		w.edges[edgeKey{from, to, graph.EdgeImports}] = &Edge{From: from, To: to, Kind: graph.EdgeImports, Status: status}
 	}
 	for _, e := range pd.ImportsAdded {
-		imp(struct{ From, To string }{e.From, e.To}, EdgeAdded)
+		imp(e.From, e.To, EdgeAdded)
 	}
 	for _, e := range pd.ImportsRemoved {
-		imp(struct{ From, To string }{e.From, e.To}, EdgeRemoved)
+		imp(e.From, e.To, EdgeRemoved)
 	}
 	// unchanged imports among drawn packages, from the head graph
 	for _, from := range w.sortedIDs() {
@@ -519,9 +529,57 @@ func (b *builder) wiring() *Diagram {
 			}
 		}
 	}
+	// Discarded, not recorded: Omitted.Orphans is the call-path table's, and a
+	// package left with no drawn import is already accounted for by the
+	// diagram it was dropped from. Twice, for the reason 4g gives: the
+	// terminal rule inside budgetWiring keeps nodes but only the edges among
+	// them, so it strands packages of its own.
+	w.pruneOrphans()
+	b.budgetWiring(w)
+	w.pruneOrphans()
+	if len(w.nodes) == 0 {
+		return nil
+	}
 	dg := w.diagram()
 	dg.Subgraphs = []string{}
 	return dg
+}
+
+// excludedPkg reports whether a package is a test or generated one, counting
+// it the first time it is refused so the note can say how many were left out.
+func (b *builder) excludedPkg(pkgID string) bool {
+	if !b.isTestPkg(pkgID) {
+		return false
+	}
+	b.excludedPkgs[pkgID] = true
+	return true
+}
+
+// budgetWiring holds the wiring diagram to the node and character budgets.
+// Only the terminal rule applies: steps 4a to 4d are about call edges and
+// symbol nodes, and this diagram has neither. Over-budget is a legibility
+// problem here, not a reason to fall back to SVG.
+func (b *builder) budgetWiring(w *work) {
+	B := b.opts.Budget.Nodes
+	if !b.over(w, B) {
+		return
+	}
+	for {
+		t := b.topB(w, B)
+		// topB drops nodes and the edges that went with them, so both caps
+		// can be checked on the result. Unlike terminal() there is no SVG
+		// fallback, so the last attempt is always committed rather than the
+		// unreduced diagram being left in place.
+		fits := b.opts.Measure == nil || b.measure(t) <= b.opts.Budget.Chars
+		if bud := b.opts.Budget.Edges; bud > 0 && len(t.edges) > bud {
+			fits = false
+		}
+		if fits || B < terminalFloor {
+			b.commit(w, t)
+			return
+		}
+		B -= terminalStep
+	}
 }
 
 // omitted fills the details-section lists.
@@ -532,6 +590,18 @@ func (b *builder) omitted(res *Result) {
 			drawn[n.ID] = true
 		}
 	}
+	// Orphans are not drawn but are still reported, row and permalink, in the
+	// details table. split can hand the same node back twice, so dedupe.
+	seenOrphan := map[string]bool{}
+	for _, n := range b.orphans {
+		if seenOrphan[n.ID] || drawn[n.ID] {
+			continue
+		}
+		seenOrphan[n.ID] = true
+		res.Omitted.Orphans = append(res.Omitted.Orphans, n)
+		drawn[n.ID] = true
+	}
+	sort.Slice(res.Omitted.Orphans, func(i, j int) bool { return res.Omitted.Orphans[i].ID < res.Omitted.Orphans[j].ID })
 	for _, id := range b.d.Nodes.BodyChanged {
 		if !drawn[id] {
 			res.Omitted.BodyOnly = append(res.Omitted.BodyOnly, id)
@@ -543,18 +613,16 @@ func (b *builder) omitted(res *Result) {
 			res.Omitted.WideReach = append(res.Omitted.WideReach, WideReach{Entrypoint: ep.ID, Added: append([]string{}, ep.WideReachAdded...), Removed: append([]string{}, ep.WideReachRemoved...)})
 		}
 	}
+	res.Omitted.HiddenNodes = b.hiddenNodes
 	res.Omitted.CollapsedSymbols = b.collapsedSymbols
 	res.Omitted.ExcludedGenerated = b.excludedGenerated
 	res.Omitted.ExcludedTest = b.excludedTest
-	for _, dg := range res.CallPaths {
-		if n := dg.NodeByID("more:hidden"); n != nil {
-			var hidden int
-			fmt.Sscanf(n.Label, "+%d more", &hidden)
-			res.Omitted.HiddenNodes += hidden
-		}
-	}
+	res.Omitted.ExcludedTestPackages = len(b.excludedPkgs)
 	if res.Omitted.BodyOnly == nil {
 		res.Omitted.BodyOnly = []string{}
+	}
+	if res.Omitted.Orphans == nil {
+		res.Omitted.Orphans = []Node{}
 	}
 	if res.Omitted.WideReach == nil {
 		res.Omitted.WideReach = []WideReach{}

@@ -47,17 +47,30 @@ import (
 )
 
 func init() {
-	register(command{name: "weekly", short: "run the weekly structure job: per-repo delta, attribution, pinned layout, wiki page", run: runWeekly})
+	register(command{name: "weekly", short: "the weekly structure brief: per-repo delta, attribution, pinned layout, wiki page (or --repo for one local checkout)", run: runWeekly})
 }
 
 func runWeekly(args []string) error {
 	fs := flag.NewFlagSet("weekly", flag.ContinueOnError)
 	reposFile := fs.String("repos", "repos.yml", "YAML list of repos to cover")
+	repoDir := fs.String("repo", "", "one local checkout to brief on, instead of --repos; implies --dry-run")
+	branch := fs.String("branch", "", "branch to walk with --repo (default: the checkout's current branch)")
+	extractor := fs.String("extractor", "", "external extractor executable (plug-in contract, spec 6.3), with --repo")
 	when := fs.String("week", "", "any date in the week to report (YYYY-MM-DD); default: last week")
 	out := fs.String("o", "", "write the page markdown here as well as (or instead of, with --dry-run) the wiki")
 	dryRun := fs.Bool("dry-run", false, "do not publish; print the page")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *repoDir == "" {
+		if *branch != "" || *extractor != "" {
+			return fmt.Errorf("--branch and --extractor apply to --repo; the repos file carries them per repo")
+		}
+	} else {
+		if fsSet(fs, "repos") {
+			return fmt.Errorf("--repo and --repos are alternatives; pass one")
+		}
+		*dryRun = true // there is no wiki to publish to in local mode
 	}
 	ref := time.Now().UTC().AddDate(0, 0, -7)
 	if *when != "" {
@@ -70,9 +83,18 @@ func runWeekly(args []string) error {
 	start, end := weekly.WeekWindow(ref)
 	title := weekly.PageTitle(ref)
 
-	wd, err := weeklyDeps(*reposFile, *dryRun)
+	var wd weeklyDepsT
+	var err error
+	if *repoDir != "" {
+		wd, err = weeklyLocalDeps(*repoDir, *branch, *extractor)
+	} else {
+		wd, err = weeklyDeps(*reposFile, *dryRun)
+	}
 	if err != nil {
 		return err
+	}
+	if wd.Cleanup != nil {
+		defer wd.Cleanup()
 	}
 	ctx := context.Background()
 	var sections []string
@@ -206,4 +228,16 @@ func weeklyGraph(ctx context.Context, wd weeklyDepsT, r weeklyRepo, sha string) 
 		_ = wd.Graphs.Put(ctx, key, b)
 	}
 	return g, nil
+}
+
+// fsSet reports whether a flag was given on the command line, as opposed to
+// left at its default.
+func fsSet(fs *flag.FlagSet, name string) bool {
+	found := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }

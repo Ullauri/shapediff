@@ -18,6 +18,7 @@ func Dot(dg *filter.Diagram) string {
 	for _, s := range dg.Subgraphs {
 		sub[s] = true
 	}
+	names := shortNames(dg)
 	byPkg := map[string][]filter.Node{}
 	var bare []filter.Node
 	for _, n := range dg.Nodes {
@@ -33,15 +34,15 @@ func Dot(dg *filter.Diagram) string {
 	}
 	sort.Strings(pkgs)
 	for _, p := range pkgs {
-		fmt.Fprintf(&b, "  subgraph cluster_%s {\n    label=%q;\n    color=\"#9ca3af\";\n", sanitize(p), shortPkg(p))
+		fmt.Fprintf(&b, "  subgraph cluster_%s {\n    label=%q;\n    color=\"#9ca3af\";\n", sanitize(p), pickName(names, p))
 		for _, n := range byPkg[p] {
 			b.WriteString("  ")
-			dotNode(&b, n)
+			dotNode(&b, n, names)
 		}
 		b.WriteString("  }\n")
 	}
 	for _, n := range bare {
-		dotNode(&b, n)
+		dotNode(&b, n, names)
 	}
 	for _, e := range dg.Edges {
 		attrs := []string{}
@@ -66,7 +67,7 @@ func Dot(dg *filter.Diagram) string {
 	return b.String()
 }
 
-func dotNode(b *strings.Builder, n filter.Node) {
+func dotNode(b *strings.Builder, n filter.Node, names map[string]string) {
 	shape := "box"
 	switch n.Kind {
 	case filter.KindEntrypoint:
@@ -87,7 +88,7 @@ func dotNode(b *strings.Builder, n filter.Node) {
 	case filter.StatusQuery:
 		fill, stroke = "#dbeafe", "#2563eb"
 	}
-	fmt.Fprintf(b, "  %q [label=%q, shape=%s, fillcolor=\"%s\", color=\"%s\"];\n", nID(n.ID), Label(n), shape, fill, stroke)
+	fmt.Fprintf(b, "  %q [label=%q, shape=%s, fillcolor=\"%s\", color=\"%s\"];\n", nID(n.ID), labelIn(n, names), shape, fill, stroke)
 }
 
 // SVG renders the diagram with graphviz dot. It returns an error when dot

@@ -19,6 +19,8 @@ budget:
   edges: 36                     # E, default 1.5 x B
 narrow_targets: 2               # k, section 7.4
 narration: template             # template | llm | off
+weekly_url: ""                  # the weekly structure brief (section 14.2); shown to a
+                                # reader who is behind on the repo, not just on this MR
 llm:                            # only read when narration is llm
   endpoint: ""                  # any OpenAI-compatible chat completions URL
   model: ""

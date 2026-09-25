@@ -1,0 +1,21 @@
+{
+  "module": "miniflux.app/v2",
+  "components": [
+    {"id": "ui", "label": "Web UI", "type": "frontend", "packages": ["internal/ui/**"]},
+    {"id": "api", "label": "REST API", "type": "backend", "packages": ["internal/api"]},
+    {"id": "compat", "label": "Fever + Google Reader APIs", "type": "backend", "packages": ["internal/fever", "internal/googlereader"]},
+    {"id": "server", "label": "HTTP server", "type": "cloud", "packages": ["internal/http/server"]},
+    {"id": "auth", "label": "OAuth2 / OIDC", "type": "security", "packages": ["internal/oauth2"]},
+    {"id": "fetch", "label": "Feed fetching", "type": "backend", "packages": ["internal/reader/fetcher", "internal/reader/handler", "internal/reader/subscription", "internal/reader/icon", "internal/reader/scraper", "internal/reader/opml"]},
+    {"id": "parse", "label": "Feed parsing", "type": "backend", "packages": ["internal/reader/parser", "internal/reader/atom", "internal/reader/rss", "internal/reader/rdf", "internal/reader/json", "internal/reader/xml", "internal/reader/date", "internal/reader/dublincore", "internal/reader/encoding", "internal/reader/media", "internal/reader/googleplay", "internal/reader/itunes", "internal/reader/language"]},
+    {"id": "process", "label": "Content processing", "type": "backend", "packages": ["internal/reader/processor", "internal/reader/sanitizer", "internal/reader/readability", "internal/reader/rewrite", "internal/reader/filter", "internal/reader/urlcleaner", "internal/reader/readingtime"]},
+    {"id": "storage", "label": "Storage layer", "type": "backend", "packages": ["internal/storage", "internal/database"]},
+    {"id": "worker", "label": "Refresh workers", "type": "messagebus", "packages": ["internal/worker"]},
+    {"id": "integration", "label": "Integrations", "type": "cloud", "packages": ["internal/integration/**"]},
+    {"id": "mediaproxy", "label": "Media proxy", "type": "backend", "packages": ["internal/mediaproxy"]},
+    {"id": "httpclient", "label": "HTTP client", "type": "backend", "packages": ["internal/http/client"]},
+    {"id": "cli", "label": "CLI", "type": "backend", "packages": ["internal/cli"]},
+    {"id": "support", "label": "shared libraries", "type": "backend", "support": true, "packages": ["client", "internal/http/request", "internal/http/response", "internal/config", "internal/crypto", "internal/locale", "internal/model", "internal/metric", "internal/systemd", "internal/template", "internal/timezone", "internal/urllib", "internal/validator", "internal/version", "internal/proxyrotator"]}
+  ],
+  "sinks": {"sink:db:sql": "PostgreSQL", "sink:http_client:http": "Outbound HTTP"}
+}

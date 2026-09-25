@@ -25,3 +25,9 @@ scenarios:
     status: present
   package-broken-at-head:
     status: present
+  entrypoint-behind-wrapper:
+    status: n/a
+    reason: "spec 7.3 wrapped-handler rule, specified in v0.5, not implemented"
+  background-loop:
+    status: n/a
+    reason: "spec 7.3 loop entry kind, specified in v0.5, not implemented"

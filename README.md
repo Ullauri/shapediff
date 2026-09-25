@@ -20,6 +20,22 @@ toolchain lives) must be on `PATH` for anything that extracts. The Makefile
 adds it. The conformance run extracts twelve fixture pairs twice each and
 takes about a minute.
 
+## Install
+
+The module is private on GitHub (`Ullauri/shapediff`). `go` fetches a
+private module with git over https, so tell it the module is private and
+send github.com over ssh instead:
+
+```
+export GOPRIVATE=github.com/Ullauri
+git config --global url."git@github.com:".insteadOf https://github.com/
+go install github.com/Ullauri/shapediff/cmd/shapediff@v0.1.0
+```
+
+Tags follow `Version` in `cmd/shapediff/main.go`, the number `shapediff
+version` prints and every graph and cache key records. Bump it and tag in
+the same change.
+
 ## Commands
 
 ```

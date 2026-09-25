@@ -1,8 +1,12 @@
 # shapediff: structural change legibility for GitLab merge requests
 
-Status: proposal, v0.3.1, 2026-09-21. Working name only. v0.1 (2026-09-20) is
+Status: proposal, v0.5, 2026-09-24. Working name only. v0.1 (2026-09-20) is
 kept beside this file as `shapediff-spec.v0.1.md`; section 20 lists what
-changed and why, and what v0.3 added on top.
+changed and why, and what v0.3 and v0.5 added on top. v0.5 is written on
+top of v0.4 to v0.4.2, which are on the unmerged branches
+`agent/baseline-view` (section 10.1) and `agent/diagram-legibility` (the
+catching-up reader of section 2, `weekly --repo`); it cites those and does
+not restate them.
 
 This document is written to be reviewed. Every section that makes a design
 choice says what the alternative was and why it lost. Sections marked
@@ -143,7 +147,7 @@ at all. The delta engine reads it (section 8.4); nothing else does.
     "generated": false,        // file carries "// Code generated"
     "test": false,             // _test.go
     "signature": "func (*Service) Create(ctx context.Context, req CreateReq) (*Order, error)",
-    "entry_kind": null,        // http | grpc | worker | cron | cli   (entrypoint nodes)
+    "entry_kind": null,        // http | grpc | worker | cron | cli | loop   (entrypoint nodes)
     "sink_kind": null,         // db | queue | http_client | cache | fs (sink nodes)
     "sink_name_source": null   // table | package   (sink nodes; section 7.3)
   },
@@ -299,6 +303,8 @@ they gate the engine, not the extractor.
 | Interface dispatch | dynamic `calls` edge with `targets` at least 1 | |
 | Generated and test files | `generated` and `test` flags set | |
 | Entry point registered | entrypoint node plus `handles` edge | |
+| Entry point behind a wrapper (v0.5) | entrypoint node plus `inferred` `handles` edge to the wrapped function | |
+| Background loop started from main (v0.5) | `loop` entrypoint node plus `inferred` `handles` edge | |
 | Sink called | sink node plus `writes` or `reads` edge, `sink_name_source` set | |
 | Package broken at head | `load_status` not `ok` on that package | zero removals, package in `suppressed` |
 
@@ -392,6 +398,46 @@ Entry points (produce an `entrypoint` node and a `handles` edge):
 Because the route string is part of the entrypoint ID, a route rename reads
 as one entrypoint removed and one added. The delta engine reports it as a
 rename when the two share a handler symbol (section 8.1, step 0).
+
+**Added in v0.5, not implemented.** Two gaps found by the period-map spike
+(`docs/spike-period-map-2026-09-24.md`) on a repo that registers routes on
+the standard library's `ServeMux`. Both matter more on the period map
+(section 10.2), whose purpose is to show where data goes, than on the
+per-MR note:
+
+- **Wrapped handlers.** When the handler argument of a registration is
+  itself a call (`mux.Handle(p, withAuth(h.list))`, `http.HandlerFunc(f)`,
+  `chain(a, b)(f)`), the handler is the innermost argument that is a
+  function or method value declared in the module, and the `handles` edge
+  is `inferred`. When the argument is an `http.Handler` value whose VTA
+  target set is exactly one `ServeHTTP` declared in the module, that method
+  is the handler; this is a mount such as `Handle("/fever/",
+  fever.Serve(store))`. A mount whose target is a `ServeMux` is not an
+  entry point: the routes registered on that mux are. A `handles` edge is
+  exempt from section 9 step 4a whatever its confidence: that step drops
+  uncertain call edges, and a route is not uncertain for being wrapped.
+  On the spike repo, 14 of one package's 15 routes were missed for want of
+  this rule.
+- **Background loops (`loop`).** A `go` statement whose callee is a
+  function or method declared in the module, in a function narrowly
+  reachable (section 7.4) from `main.main` or from a `cli` entry point's
+  handler, produces a `loop` entry point named by the callee (a goroutine
+  has no other identity; cron is named by its handler for the same
+  reason), with an `inferred` `handles` edge. `go func() { ... }()` is
+  attributed to the enclosing function like any closure (section 6.1) and
+  so is not found; a repo adds such loops, and loops started outside
+  main's reach, with `entrypoints: loop: - func: "<import path>.<name>"`.
+  A channel hand-off is still not an edge. The rule matters because the
+  channel's *consumer* (a worker's `Run`, started with `go` by its pool) is
+  then an entry point with its own reach, so a producer-and-workers pipeline
+  shows as two entry points with the channel between them unstated. On the
+  spike repo, that pipeline is the whole feed refresh path, and without the
+  rule it is absent from the map.
+
+Until the two rules are built, their section 6.3 scenarios
+(`entrypoint-behind-wrapper`, `background-loop`) are declared `n/a` with
+that reason in `conformance/go/manifest.yml`, so the suite is not silently
+short.
 
 Sinks (produce a `sink` node and a `reads`/`writes` edge from the calling
 symbol):
@@ -574,6 +620,17 @@ v0.1 proposed `git log -L` and blame for attribution. Dropped: `-L` works on
 line ranges or a heuristic function-name regex, is unreliable across moves,
 and everything it would recover is already in the per-MR deltas.
 
+**Any period (v0.5).** Nothing in the mechanism above is weekly: it
+resolves the branch at two instants and diffs the two SHAs. v0.5 calls the
+window a **period**: a week, a calendar month, a calendar quarter (all UTC),
+or explicit dates. Two things change with longer windows. The MR list is
+longer (the merge requests API is paged, and a quarter on a busy repo is
+hundreds of MRs, still one cache read each). And a per-MR delta that left
+the cache before the period ended is attributed as "not cached", never
+recomputed; section 14.3 sets the retention that avoids it. Summing shorter
+periods stays ruled out for the reason above: a quarter is not twelve weeks
+added together.
+
 ### 8.4 Load-status asymmetry
 
 `packages.Load` continues past type errors. A head with one broken package
@@ -716,6 +773,151 @@ the stored layout, or any stored package was deleted, re-layout from
 scratch and bump the layout file's version so the reset is visible in the
 page ("layout reset this week").
 
+### 10.2 The period map
+
+The reader is section 2's catching-up reader at a longer range: someone
+back from a month away, new to the team, or reviewing a quarter. Their
+question is **"how does this system move data, and where did the period's
+change land on that?"** The weekly page answers "which packages changed and
+who changed them"; the package import diagram answers "what depends on
+what". Neither says where a request goes. This section is the rendering for
+that, and it adds no extraction: everything below is computed from the
+period's base graph, head graph and delta (section 8.3). The spike that
+tested it on one quarter of an 81k-line repo is
+`docs/spike-period-map-2026-09-24.md`: 19 nodes and 34 flows, where only one
+flow changed in the quarter. That is the same lesson 10.1 learned per MR,
+at the period scale: **draw the map with the change marked on it, not a
+diff of two maps**, because the diff alone is nearly empty.
+
+**Components.** Packages are grouped into components by the `components:`
+key (section 13). Each internal package belongs to exactly one: the glob
+with the longest literal prefix wins, ties by component ID. A package no
+glob matches falls into a fallback component named by its first two path
+segments under the module root (`internal/billing`), and the page lists
+every fallback by name, because a map made of fallbacks is a directory
+listing: on the spike repo it would have had 27 groups where the written
+map had 14. A component marked `support` (models, config, helpers) is
+counted and never drawn: calls into it would join every component to it.
+Test and generated symbols are never counted.
+
+Why the grouping is written down rather than inferred: a grouping is a
+claim about the system that the delta does not contain, so section 3 and
+section 11 rule out letting a model make it. It is written once per repo
+and reviewed like code. An agent may propose a mapping as an MR against
+`.shapediff.yml`; a person merges it.
+
+**Nodes.**
+
+- One node per **entry group**: the entry points of one kind whose handler
+  sits in one component, labelled with the count ("97 http, Web UI").
+- One node per component with at least one flow, labelled with its name
+  and definition count.
+- One node per sink (section 7.3), shaped as in section 10.
+
+**Flows.** Narrow reach (section 7.4) is computed from every non-test
+handler at once, so a symbol is on the map when some entry point reaches it
+narrowly.
+
+- An entry group flows to the component of its handlers.
+- A component flows to another when a narrowly reached symbol in one calls
+  a narrowly reached symbol in the other.
+- A component flows to a sink when a narrowly reached symbol in it reads or
+  writes that sink.
+
+Wide reach draws nothing; it is counted in the cards. The same flows are
+computed on the base graph, with package renames (section 8.1) applied to
+base IDs first, so each flow is **kept**, **new** or **gone**, and a package
+moved within one component is not a flow change.
+
+**What changed, on the map.**
+
+- **Tags on components**, from the period delta: added, removed and
+  signature-changed definitions, and new or removed packages. A component
+  with any of these is drawn as *touched* (10.1's purple), a component new
+  in the period green, a component gone red dashed.
+- **Tags on entry groups**: how many entry points were added, removed, or
+  changed reach.
+- **New flows** green and thicker, **gone flows** red and dashed, kept
+  flows grey. These are section 10's colours.
+- **Cards** beside the canvas: the section 11 templates over the period
+  delta, the entry points whose reach changed with what they now reach
+  (10.1's "which entry points are new" rule applies), and the flows that
+  appeared or went away. No new claim class: every card line names IDs
+  present in the delta or in the two flow sets.
+- **Guided views**, at most five, in a fixed order: what changed; who
+  touches each sink kind; then one per entry group with a changed entry
+  point, most changes first, ties by ID.
+
+**Coverage line, printed above the map.** It lists the entry kinds found,
+with counts. It names every component whose definitions no entry point
+reaches, with its definition count. And it lists the fallback components.
+The spike found this necessary, not decorative. Its map drew "Refresh
+workers" with no outgoing flow, because the feed refresh loop was started
+by a bare goroutine that no pattern detected (section 7.3's `loop` rule
+closes that). A map of a system reads as complete even when it is not, and
+the coverage line is what says where it is not. A confidently wrong map is
+the period-scale version of section 3's confidently wrong edge.
+
+**Size.** The map is a page, not a note, so `S` does not apply. The node
+and edge caps are `2B` and `2E` (48 and 72 by default): a page can hold
+twice a note, and the spike repo needed 19 and 34 with no cutting. Over the
+caps, cut deterministically, ties by ID, each step only while still over:
+
+1. Drop kept component-to-component flows, fewest calls first. New and
+   gone flows are never cut.
+2. Fold untouched fallback components into one "N more packages" node,
+   smallest first.
+3. Omit the map and print the tables, with one line saying so.
+
+**Open**: this order is untested, because the spike repo needed none of it.
+
+**Layout and rendering.** Layers are fixed in this order:
+
+- entry groups;
+- the components that host handlers;
+- the other components, by breadth-first distance from the hosts over the
+  union of both periods' flows, with components that touch a sink last;
+- sinks.
+
+Graphviz `dot` lays it out: `rankdir=LR`, one `rank=same` subgraph per
+layer, HTML-like labels for the name, count and tag lines, and nodes and
+edges emitted in ID order. `dot` routes backward and same-layer flows,
+which a grid cannot. For one Graphviz version, identical input gives
+identical output. Graphviz is already used by the weekly job for section
+10's pinned `neato` layout.
+
+The SVG is wrapped in **one self-contained HTML file**: the cards beside
+the canvas, one key, guided views as buttons that dim what is out of
+focus, a click on a node that highlights its flows and lists its
+definitions with permalinks at the head SHA, and a theme that follows
+`prefers-color-scheme`. The file makes no external requests and uses no
+framework. The script is presentation only, and the static SVG and cards
+carry everything the page claims. Where `dot` is absent, the same model is
+written as a Mermaid `flowchart LR` with one subgraph per layer: no
+interaction, and GitLab's `S` limit applies if it is pasted into a note
+(the spike's map was 2814 characters).
+
+**Open**: how stable the layout is across consecutive periods. `dot` does
+not take pinned positions the way `neato` does (section 10). Layer
+membership and in-layer ID order are the stable frame; how far nodes move
+week to week has not been measured. The pinned weekly package diagram stays
+for the reader who needs fixed positions.
+
+Considered and not taken:
+
+- **archify** (an agent skill that renders typed JSON to interactive
+  HTML). The spike fed it this model and it refused every attempt: its
+  dataflow type is a grid of at most 5 layers by 5 rows with no edge
+  router, and its validator wants per-edge geometry that an author supplies
+  by hand. Making generated input pass means writing a router for its
+  linter, and it adds a Node runtime to CI. Its ideas are taken: guided
+  views, cards, one key, focus on click, a self-contained file.
+- **Mermaid as the primary renderer.** No interaction, no stable layout,
+  and the character limit.
+- **Layout in the browser** (ELK.js inline). The picture would depend on a
+  script version, could not be diffed as SVG, and costs a large inline
+  bundle for a layout `dot` already does.
+
 ## 11. Narration
 
 Narration in v1 is a **deterministic template** over the delta. Eight
@@ -791,6 +993,14 @@ sinks:
     - package: "github.com/acme/svc/internal/paymentsclient"
   db:
     - package: "github.com/acme/svc/internal/db"
+components:                     # the period map's grouping, section 10.2; render-only
+  - id: storage
+    label: Storage layer
+    packages: ["internal/storage", "internal/database/**"]
+  - id: support
+    label: shared libraries
+    support: true               # counted, never drawn
+    packages: ["internal/model", "internal/config"]
 budget:
   chars: 1800                   # S; default is the instance limit measured in the spike
   nodes: 24                     # B
@@ -801,6 +1011,14 @@ narration: template             # template | llm | off
 
 The loaded config, with defaults applied, is hashed into
 `extractor.config_hash` and so into the cache key.
+
+`components` is the one key left out of `extractor.config_hash`. It changes
+nothing in a graph, it will be edited often while a team settles its map,
+and every edit would otherwise invalidate every cached graph for the repo
+(one extraction on the spike repo took 110 s and 3.2 GB). The v0.4 keys
+(`baseline`, `weekly_url`) stay in the hash: they are set once, so the cost
+is one re-extraction, and one hashing rule was simpler. That trade does not
+hold for a key that is edited repeatedly.
 
 ## 14. GitLab integration
 
@@ -884,6 +1102,36 @@ it is the only stateful component (section 16). It stays in this spec so
 the schema is built for both cadences, but it is built last and it is the
 first thing to cut.
 
+### 14.3 The period brief (v0.5)
+
+The weekly job generalises to any period (section 8.3) and gains the map of
+section 10.2:
+
+- `weekly` takes `--period week|month|quarter`, or `--since` and `--until`,
+  alongside `--week`, which stays as `--period week` for that date. Titles
+  follow the period: `Structure/Week-2026-39`, `Structure/2026-09`,
+  `Structure/2026-Q3`. The scheduled pipeline runs each configured period
+  when it closes: Monday for the week, the 1st for the month, and the 1st
+  of January, April, July and October for the quarter.
+- `--format md|html`. `md` is the wiki page of 14.2, unchanged. `html` is
+  one self-contained file: the map, then the page's tables.
+- **Publishing.** Each period's HTML goes to the generic package registry
+  that already holds the cache (section 14.1), under
+  `shapediff-pages/<repo>/<period>.html`. A `pages` job assembles `public/`
+  from the registry with an index per repo, and the wiki page links to its
+  period's file. 14.2 chose the wiki over Pages because the wiki needs no
+  build step. A static file needs none either, and GitLab does not render an
+  uploaded HTML file as a page, so the wiki cannot host the map itself.
+  Assembling from the registry keeps the `pages` job stateless: a Pages
+  deploy replaces the whole site, and the registry is where the history
+  lives.
+- **Retention.** Per-MR delta cache entries must outlive the longest
+  configured period, a quarter plus the job's lag. shapediff sets no
+  expiry on registry entries; a `dir:` cache must not be pruned sooner.
+- Local: `weekly --repo <dir> --period quarter --format html -o q3.html`,
+  building on v0.4.2's local mode. This is the form a catching-up reader
+  runs for themselves.
+
 ## 15. Phases and gates
 
 | Phase | Deliverable | Gate to proceed |
@@ -894,6 +1142,7 @@ first thing to cut.
 | 3. Render and post | Filter, Mermaid, templated narration, permalinks, MR note, delta artifact, CI template. Deployed to **one** repo, chosen by agent-MR volume. | Runs until at least 15 structural MRs have received a note (extend the window as needed, expect more than two weeks). Denominator is **structural MRs only**. Signals, pre-registered before the phase starts with a pass mark: (a) fraction of those MRs where a reviewer comment references the note or a node named only in it; (b) an award emoji on the note, requested in the note's footer, counted via the API; (c) a five-question reviewer survey with the questions and pass mark written down before deployment. |
 | 4. Narration rewrite | Optional LLM pass with the triple and blocklist validators, behind the template. | A/B on twenty notes: reviewers prefer the rewrite, and zero evaluative sentences survive. Otherwise the template stays and the LLM never ships. |
 | 5. Weekly | Weekly pipeline, pinned layout, wiki page, roll-up, attribution from cached deltas. Starts only after phase 3 passes. | Two consecutive weeks each end in a **traceable decision**: a task filed, a refactor scheduled, or an explicit recorded "nothing to do". Attendance at a meeting is not the gate. |
+| 5b. Period map (v0.5) | Section 10.2 map, section 14.3 periods and HTML, the two section 7.3 rules (wrapped handlers, `loop`), `components:` for the pilot repo. Starts after phase 5's first passing week. | On the pilot repo, a developer who did not work in it during the period answers three questions about where data goes, written down before they see the map, and someone who knows the code marks the answers. A maintainer reads the coverage line and names no main path it leaves out. |
 | 6. JS/TS | Second extractor behind the same schema, driven through the section 6.3 plug-in contract, with its own fixture pair or an explained `n/a` for every scenario. | Passes the section 6.3 suite. Delta engine and renderer unchanged. |
 | 7. Plan query | Given a plan's named symbols, query the **base graph**: who calls them, what they reach, which entrypoints they sit under, rendered with the same filter and renderer. | Used on ten agent-authored plans that actually name symbols. If the plans do not name symbols, this phase is a plan-format project, not this tool's. |
 
@@ -918,6 +1167,10 @@ same question ("what would this plan touch?") exactly.
 - No server component in v1. State is the graph cache, the per-MR delta
   cache and the weekly layout positions, all files in object storage.
 
+- The period map (section 10.2) adds flags to `weekly`, not a subcommand:
+  `--period`, `--since`, `--until`, `--format`. `dot` becomes required for
+  `--format html`, with Mermaid as the fallback where it is missing.
+
 ## 17. Risks
 
 | Risk | Mitigation |
@@ -932,6 +1185,7 @@ same question ("what would this plan touch?") exactly.
 | Cache mixes extractor versions | Extractor version, toolchain, builder mode and config hash in the key |
 | Schema too Go-shaped for TS | `confidence` field and file-convention entry names exist from v1; section 6.3 suite names every scenario language-neutrally and forces an explained `n/a`; phase 6 gate is "engine unchanged" |
 | Wrong pilot language | Section 5 open item: record the language mix before phase 1 |
+| The period map looks complete when entry detection is not | Coverage line above every map (section 10.2); the two section 7.3 rules; phase 5b gate has a maintainer read the coverage line |
 
 ## 18. Decisions on v0.1's open questions
 
@@ -971,6 +1225,15 @@ same question ("what would this plan touch?") exactly.
    (section 14.1).
 5. Whether the target repos use sqlc at all (section 7.3). If not, sink
    naming is package-level and question 3 closes free.
+6. The period map's cut order (section 10.2), untested beyond one
+   81k-line repo that needed no cutting.
+7. How stable the period map's layout is across consecutive periods
+   (section 10.2).
+8. How precise the `loop` rule is (section 7.3): on the pilot repo, how
+   many `go` statements reachable from main are long-running loops rather
+   than fire-and-forget helpers.
+9. Whether Pages is enabled on the target instance, and who can see a
+   project's Pages site (section 14.3).
 
 ## 20. Changes from v0.1
 
@@ -1048,6 +1311,33 @@ Considered and not taken:
 - **Amber outline for body-changed nodes on a path** (general, engineer).
   Taken as a badge instead (PM), since amber already means signature
   changed.
+
+### Added in v0.5 (owner's request, 2026-09-24)
+
+The ask: a weekly, monthly or quarterly view that explains how a system
+moves data, the way archify's diagrams do, instead of only code-level
+deltas. A spike (`docs/spike-period-map-2026-09-24.md`) built that view
+for one quarter of miniflux from the existing graphs and delta, and fed it
+to archify.
+
+- **Section 10.2, the period map.** Components from a written mapping,
+  entry groups, flows from narrow reach on both ends of the period, the
+  period's change as tags, colours and cards, and a coverage line that
+  says what the map cannot see. Rendered with `dot` into one
+  self-contained HTML file; Mermaid is the fallback. archify was considered
+  and rejected on the spike's evidence; its ideas are taken.
+- **Section 8.3: any period**, not only a week. **Section 14.3**: periods,
+  HTML output, publishing through the package registry to Pages, and
+  cache retention.
+- **Section 7.3: two detection rules**, for wrapped handlers and for
+  background loops (`loop`, a new entry kind in section 6.1). They are
+  specified, not implemented, and they come with two new section 6.3
+  scenarios. The spike found both gaps by looking at the map. The rules
+  gate phase 5b because a map missing its main pipeline is worse than no
+  map.
+- **Section 13: `components:`**, the first key outside
+  `extractor.config_hash`, and why.
+- Sections 15 (phase 5b), 16, 17 and 19 updated to match.
 
 ### Added in v0.3.1 (implementation, 2026-09-21)
 

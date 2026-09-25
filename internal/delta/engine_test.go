@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 type builder struct{ d *graph.Document }

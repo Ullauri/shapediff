@@ -8,12 +8,12 @@ import (
 	"os"
 	"time"
 
-	"shapediff/internal/config"
-	"shapediff/internal/delta"
-	"shapediff/internal/filter"
-	"shapediff/internal/graph"
-	"shapediff/internal/narrate"
-	"shapediff/internal/render"
+	"github.com/Ullauri/shapediff/internal/config"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/filter"
+	"github.com/Ullauri/shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/narrate"
+	"github.com/Ullauri/shapediff/internal/render"
 )
 
 func init() {

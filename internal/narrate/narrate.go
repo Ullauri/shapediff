@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"shapediff/internal/delta"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // MaxSentences is the cap on narration length.

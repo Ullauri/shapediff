@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"shapediff/internal/delta"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // Priorities, highest first (section 9, definitions).

@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"shapediff/internal/config"
-	"shapediff/internal/conform"
-	"shapediff/internal/goextract"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/config"
+	"github.com/Ullauri/shapediff/internal/conform"
+	"github.com/Ullauri/shapediff/internal/goextract"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 func init() {

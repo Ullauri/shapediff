@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"shapediff/internal/filter"
+	"github.com/Ullauri/shapediff/internal/filter"
 )
 
 // Legend is the line printed under every call-path diagram.

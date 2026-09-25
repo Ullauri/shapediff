@@ -16,8 +16,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"shapediff/internal/delta"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // Manifest is conformance/<language>/manifest.yml.

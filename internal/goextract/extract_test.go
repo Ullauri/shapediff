@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 func fixtureDir(t *testing.T, scenario, side string) string {

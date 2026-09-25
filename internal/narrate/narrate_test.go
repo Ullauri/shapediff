@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"shapediff/internal/delta"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 func headIndex() *graph.Index {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"shapediff/internal/config"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/config"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // TestRichFixture is the phase 1 golden test list of spec section 15:

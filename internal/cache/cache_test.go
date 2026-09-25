@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"shapediff/internal/gitlab"
+	"github.com/Ullauri/shapediff/internal/gitlab"
 )
 
 func TestKeyStableAndDistinct(t *testing.T) {

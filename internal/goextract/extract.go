@@ -24,8 +24,8 @@ import (
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/ssa/ssautil"
 
-	"shapediff/internal/config"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/config"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // Name and precision recorded in every document's extractor block.

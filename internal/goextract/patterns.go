@@ -3,7 +3,7 @@ package goextract
 import (
 	"strings"
 
-	"shapediff/internal/config"
+	"github.com/Ullauri/shapediff/internal/config"
 )
 
 // Pattern tables of spec section 7.3. A callee key is

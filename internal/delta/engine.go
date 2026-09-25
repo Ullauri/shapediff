@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // Options controls one delta computation.

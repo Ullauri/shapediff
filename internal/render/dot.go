@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"shapediff/internal/filter"
+	"github.com/Ullauri/shapediff/internal/filter"
 )
 
 // Dot renders a diagram as graphviz source for the SVG fallback.

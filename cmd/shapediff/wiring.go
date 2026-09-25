@@ -15,14 +15,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"shapediff/internal/cache"
-	"shapediff/internal/config"
-	"shapediff/internal/delta"
-	"shapediff/internal/gitlab"
-	"shapediff/internal/goextract"
-	"shapediff/internal/graph"
-	"shapediff/internal/pipeline"
-	"shapediff/internal/render"
+	"github.com/Ullauri/shapediff/internal/cache"
+	"github.com/Ullauri/shapediff/internal/config"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/gitlab"
+	"github.com/Ullauri/shapediff/internal/goextract"
+	"github.com/Ullauri/shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/pipeline"
+	"github.com/Ullauri/shapediff/internal/render"
 )
 
 // notesAdapter narrows gitlab.Client to what the pipeline needs.

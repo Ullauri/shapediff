@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"shapediff/internal/gitlab"
+	"github.com/Ullauri/shapediff/internal/gitlab"
 )
 
 // Key identifies one cached graph. Every field is part of the key so an

@@ -3,8 +3,8 @@ package filter
 import (
 	"fmt"
 
-	"shapediff/internal/delta"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // gb builds small graphs for tests.

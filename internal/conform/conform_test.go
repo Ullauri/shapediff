@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"shapediff/internal/config"
-	"shapediff/internal/goextract"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/config"
+	"github.com/Ullauri/shapediff/internal/goextract"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 func builtin() Extractor {

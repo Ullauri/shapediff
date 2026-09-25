@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"shapediff/internal/delta"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // RepoWeek is everything the page needs for one repo.

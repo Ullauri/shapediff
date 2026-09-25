@@ -22,8 +22,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"shapediff/internal/config"
-	"shapediff/internal/pipeline"
+	"github.com/Ullauri/shapediff/internal/config"
+	"github.com/Ullauri/shapediff/internal/pipeline"
 )
 
 func init() {

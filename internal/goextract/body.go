@@ -7,7 +7,7 @@ import (
 	"go/token"
 	"strings"
 
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // bodyHashes computes the four body fields of spec section 6.1 from the

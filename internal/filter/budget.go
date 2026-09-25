@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // over reports whether the working diagram exceeds any budget.

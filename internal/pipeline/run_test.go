@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"shapediff/internal/cache"
-	"shapediff/internal/delta"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/cache"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 type fakeNotes struct {

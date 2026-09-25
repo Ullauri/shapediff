@@ -1,4 +1,4 @@
-module shapediff
+module github.com/Ullauri/shapediff
 
 go 1.26.0
 

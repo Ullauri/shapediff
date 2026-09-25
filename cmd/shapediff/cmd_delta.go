@@ -7,9 +7,9 @@ import (
 	"os/exec"
 	"strings"
 
-	"shapediff/internal/config"
-	"shapediff/internal/delta"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/config"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 func init() {

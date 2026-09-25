@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // canned builds a small valid document for the fake extractor to emit.

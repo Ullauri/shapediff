@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"shapediff/internal/delta"
-	"shapediff/internal/filter"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/filter"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 func sample() *filter.Diagram {

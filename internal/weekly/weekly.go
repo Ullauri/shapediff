@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/delta"
 )
 
 // MergedMR is what attribution needs from the MR API.

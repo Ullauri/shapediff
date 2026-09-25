@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"shapediff/internal/delta"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // ValidateClaims checks every claim deterministically against the delta:

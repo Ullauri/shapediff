@@ -10,7 +10,7 @@ import (
 	"os"
 	"sort"
 
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // SchemaVersion of the delta document.

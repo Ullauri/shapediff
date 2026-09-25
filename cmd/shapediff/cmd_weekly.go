@@ -39,11 +39,11 @@ import (
 	"strings"
 	"time"
 
-	"shapediff/internal/cache"
-	"shapediff/internal/delta"
-	"shapediff/internal/graph"
-	"shapediff/internal/pipeline"
-	"shapediff/internal/weekly"
+	"github.com/Ullauri/shapediff/internal/cache"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/pipeline"
+	"github.com/Ullauri/shapediff/internal/weekly"
 )
 
 func init() {

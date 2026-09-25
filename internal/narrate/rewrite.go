@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"shapediff/internal/delta"
-	"shapediff/internal/graph"
+	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/graph"
 )
 
 // Client produces JSON claims from a prompt. The only implementation here

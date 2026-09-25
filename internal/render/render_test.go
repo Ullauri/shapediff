@@ -112,8 +112,24 @@ func TestNoteGolden(t *testing.T) {
 			Edges: []filter.Edge{{From: "pkg:acme/svc/orders", To: "pkg:acme/svc/util", Kind: "imports", Status: filter.EdgeAdded}}},
 		Omitted: filter.Omitted{HiddenNodes: 2, CollapsedSymbols: 3, BodyOnly: []string{"sym:acme/svc/orders.Service"}, WideReach: []filter.WideReach{{Entrypoint: "entry:http:POST /orders", Added: []string{"pkg:acme/svc/audit"}}}},
 	}
+	bl := &filter.Baseline{Packages: 3, External: 1, Entrypoints: 2, Sinks: 1,
+		Touched: []filter.TouchedPackage{{ID: "pkg:acme/svc/orders", Label: "orders", Status: filter.StatusTouched, Dir: "orders", Symbols: 12, Added: 1, Changed: 1,
+			ImportedBy: []string{"api", "billing", "cron", "export", "ops"}, Entrypoints: []string{"entry:http:POST /orders"}, Sinks: []string{"sink:db:orders"}},
+			{ID: "pkg:acme/svc/util", Label: "util", Status: filter.StatusAdded, Dir: "util", Symbols: 3, ImportedBy: []string{"orders"}, Entrypoints: []string{}, Sinks: []string{}}},
+		Map: &filter.Diagram{Nodes: []filter.Node{
+			{ID: "entrygroup:http:acme/svc/orders", Label: "2 http routes", Kind: filter.KindEntrypoint, Status: filter.StatusContext},
+			{ID: "pkg:acme/svc/orders", Label: "orders", Kind: filter.KindPackage, Package: "acme/svc/orders", Status: filter.StatusTouched},
+			{ID: "pkg:acme/svc/store", Label: "store", Kind: filter.KindPackage, Package: "acme/svc/store", Status: filter.StatusContext},
+			{ID: "pkg:acme/svc/util", Label: "util", Kind: filter.KindPackage, Package: "acme/svc/util", Status: filter.StatusAdded},
+			{ID: "sinkkind:db", Label: "db", Kind: filter.KindSink, Status: filter.StatusContext}},
+			Edges: []filter.Edge{{From: "entrygroup:http:acme/svc/orders", To: "pkg:acme/svc/orders", Kind: "handles", Status: filter.EdgeUnchanged},
+				{From: "pkg:acme/svc/orders", To: "pkg:acme/svc/store", Kind: "imports", Status: filter.EdgeUnchanged},
+				{From: "pkg:acme/svc/orders", To: "pkg:acme/svc/util", Kind: "imports", Status: filter.EdgeAdded},
+				{From: "pkg:acme/svc/store", To: "sinkkind:db", Kind: "writes", Status: filter.EdgeUnchanged}},
+			Subgraphs: []string{}},
+		Collapsed: 4, EntryStatus: map[string]string{"entry:http:POST /orders": "added"}}
 	mode := "InstantiateGenerics"
-	in := NoteInput{Delta: d, Filter: res, Headline: "0 endpoints added, 1 endpoint's reach changed, 1 signature changed (3 callers), 1 package added.",
+	in := NoteInput{Delta: d, Filter: res, Baseline: bl, Headline: "0 endpoints added, 1 endpoint's reach changed, 1 signature changed (3 callers), 1 package added.",
 		Suppression: "head does not compile: `acme/svc/broken` (2 changes hidden)", Sentences: []string{"`POST /orders` now reaches `orders`.", "`(*Service).Create` changed signature (3 callers)."},
 		ProjectURL: "https://gitlab.example.com/acme/svc/", HeadSHA: d.HeadSHA, BaseSHA: d.BaseSHA, MRIID: 7,
 		Extractor: graph.Extractor{Name: "go-xtools", Version: "0.1.0", Precision: "typed", Toolchain: "go1.26.0", BuilderMode: &mode}, Elapsed: 1234 * time.Millisecond}
@@ -124,7 +140,12 @@ func TestNoteGolden(t *testing.T) {
 	if !strings.HasPrefix(got, Marker+"\n") {
 		t.Error("marker must be the first line")
 	}
-	order := []string{"**0 endpoints added", "head does not compile", "now reaches", "#### Dataflow", "#### Call paths", Legend, "<details><summary>1 more call-path diagram", "**GET /x**", "#### Module wiring", "<details><summary>Details", "| node | status |", "[orders/v.go:7](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7)", "[util/o.go:1](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1)", "**Renames**", "`Old` → `Older` ?", "**Body-only changes**", "**Wide-reach changes**", "**Suppressed packages**", "2 nodes hidden by the budget", "**Warnings**", "vta took 41s", "extractor go-xtools 0.1.0 (typed, go1.26.0), base aaaaaaaa, head bbbbbbbb, 1.234s"}
+	order := []string{"**0 endpoints added", "head does not compile", "now reaches", "#### Where this lands",
+		"At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external module not drawn). This MR changes code in 1 of them and adds 1 new package.",
+		"| package | symbols | this MR | imported by | reached from | talks to |",
+		"| [`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders) | 12 | 1 added, 1 changed | `api`, `billing`, `cron`, `export`, +1 | `POST /orders` (new) | `db orders` |",
+		"| [`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util) | 3 | new package | `orders` | — | — |",
+		"classDef touched", `(["2 http routes"])`, BaselineLegend + " 4 untouched packages folded into their directory to fit.", "#### Dataflow", "#### Call paths", Legend, "<details><summary>1 more call-path diagram", "**GET /x**", "#### Module wiring", "<details><summary>Details", "| node | status |", "[orders/v.go:7](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7)", "[util/o.go:1](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1)", "**Renames**", "`Old` → `Older` ?", "**Body-only changes**", "**Wide-reach changes**", "**Suppressed packages**", "2 nodes hidden by the budget", "**Warnings**", "vta took 41s", "extractor go-xtools 0.1.0 (typed, go1.26.0), base aaaaaaaa, head bbbbbbbb, 1.234s"}
 	pos := 0
 	for _, o := range order {
 		i := strings.Index(got[pos:], o)

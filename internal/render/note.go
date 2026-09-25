@@ -17,9 +17,11 @@ const Marker = "<!-- shapediff:v1 -->"
 
 // NoteInput is everything the note needs.
 type NoteInput struct {
-	Delta       *delta.Delta
-	Head, Base  *graph.Index
-	Filter      *filter.Result
+	Delta      *delta.Delta
+	Head, Base *graph.Index
+	Filter     *filter.Result
+	// Baseline is the "where this lands" view; nil leaves the section out.
+	Baseline    *filter.Baseline
 	Headline    string
 	Suppression string
 	Sentences   []string
@@ -55,11 +57,14 @@ func Note(in NoteInput) (string, error) {
 	if len(in.Sentences) > 0 {
 		b.WriteString("\n" + strings.Join(in.Sentences, " ") + "\n")
 	}
+	if in.Baseline != nil && (in.Baseline.Map != nil || len(in.Baseline.Touched) > 0) {
+		writeBaseline(&b, in)
+	}
 	if in.Filter.Dataflow != nil {
 		b.WriteString("\n#### Dataflow\n\n")
 		fence(&b, Mermaid(in.Filter.Dataflow))
 	}
-	if len(in.Filter.CallPaths) > 0 {
+	if len(in.Filter.CallPaths) > 0 && len(in.Filter.CallPaths[0].Nodes) > 0 {
 		b.WriteString("\n#### Call paths\n\n")
 		primary := in.Filter.CallPaths[0]
 		if in.Filter.Fallback {
@@ -92,6 +97,128 @@ func Note(in NoteInput) (string, error) {
 	fmt.Fprintf(&b, "\nextractor %s %s (%s, %s), base %s, head %s, %s\n", in.Extractor.Name, in.Extractor.Version, in.Extractor.Precision, in.Extractor.Toolchain, short(in.BaseSHA), short(in.HeadSHA), in.Elapsed.Round(time.Millisecond))
 	b.WriteString("</details>\n")
 	return b.String(), nil
+}
+
+// BaselineLegend is the line printed under the baseline map.
+const BaselineLegend = "Legend: purple changed by this MR, green added, red dashed removed, grey untouched; rounded entry points, cylinder sinks; arrows are imports; boxes are directories."
+
+// writeBaseline is the "Where this lands" section (spec 10.1): one line
+// on the repo's size at the base, one row per package the MR changed
+// inside, then the package map with those packages highlighted. It is
+// written for a reader who does not know the repo: every name is a
+// package, an entry point or a sink, and every package links to its
+// directory at the base SHA.
+func writeBaseline(b *strings.Builder, in NoteInput) {
+	bl := in.Baseline
+	b.WriteString("\n#### Where this lands\n\n")
+	fmt.Fprintf(b, "At base %s the repo has %d %s, %d %s and %d %s",
+		short(in.BaseSHA), bl.Packages, plural(bl.Packages, "package", "packages"),
+		bl.Entrypoints, plural(bl.Entrypoints, "entry point", "entry points"),
+		bl.Sinks, plural(bl.Sinks, "sink", "sinks"))
+	if bl.External > 0 {
+		fmt.Fprintf(b, " (%d external %s not drawn)", bl.External, plural(bl.External, "module", "modules"))
+	}
+	changed, added := 0, 0
+	for _, t := range bl.Touched {
+		if t.Status == filter.StatusAdded {
+			added++
+		} else {
+			changed++
+		}
+	}
+	switch {
+	case changed == 0 && added == 0:
+		b.WriteString(". This MR changes code in none of them.\n")
+	case changed == 0:
+		fmt.Fprintf(b, ". This MR adds %d new %s.\n", added, plural(added, "package", "packages"))
+	case added == 0:
+		fmt.Fprintf(b, ". This MR changes code in %d of them.\n", changed)
+	default:
+		fmt.Fprintf(b, ". This MR changes code in %d of them and adds %d new %s.\n", changed, added, plural(added, "package", "packages"))
+	}
+	if len(bl.Touched) > 0 {
+		b.WriteString("\n| package | symbols | this MR | imported by | reached from | talks to |\n|---|---|---|---|---|---|\n")
+		for _, t := range bl.Touched {
+			name := "`" + mdEsc(t.Label) + "`"
+			if t.Dir != "" && in.ProjectURL != "" {
+				sha := in.BaseSHA
+				if t.Status == filter.StatusAdded {
+					sha = in.HeadSHA
+				}
+				name = fmt.Sprintf("[%s](%s/-/tree/%s/%s)", name, strings.TrimRight(in.ProjectURL, "/"), sha, t.Dir)
+			}
+			var did []string
+			switch t.Status {
+			case filter.StatusAdded:
+				did = append(did, "new package")
+			case filter.StatusRemoved:
+				did = append(did, "removed")
+			}
+			for _, c := range []struct {
+				n    int
+				what string
+			}{{t.Added, "added"}, {t.Removed, "removed"}, {t.Changed, "changed"}, {t.Renamed, "renamed"}} {
+				// "new package" and "removed" already say where every symbol went
+				if c.n == 0 || (t.Status == filter.StatusAdded && c.what == "added") || (t.Status == filter.StatusRemoved && c.what == "removed") {
+					continue
+				}
+				did = append(did, fmt.Sprintf("%d %s", c.n, c.what))
+			}
+			fmt.Fprintf(b, "| %s | %d | %s | %s | %s | %s |\n", name, t.Symbols, strings.Join(did, ", "), shortList(t.ImportedBy, 4, nil), shortList(t.Entrypoints, 4, bl.EntryStatus), shortList(t.Sinks, 4, nil))
+		}
+	}
+	if bl.Map == nil {
+		if bl.MapOmitted {
+			b.WriteString("\nThe package map exceeds the Mermaid size limit for this instance even at its smallest; not drawn.\n")
+		}
+		return
+	}
+	b.WriteString("\n")
+	fence(b, Mermaid(bl.Map))
+	b.WriteString(BaselineLegend)
+	var cut []string
+	if bl.Collapsed > 0 {
+		cut = append(cut, fmt.Sprintf("%d untouched %s folded into their directory", bl.Collapsed, plural(bl.Collapsed, "package", "packages")))
+	}
+	if bl.Hidden > 0 {
+		cut = append(cut, fmt.Sprintf("%d %s hidden", bl.Hidden, plural(bl.Hidden, "package", "packages")))
+	}
+	if len(cut) > 0 {
+		b.WriteString(" " + strings.Join(cut, " and ") + " to fit.")
+	}
+	b.WriteString("\n")
+}
+
+// shortList renders up to max names from IDs, then "+N"; "—" when empty.
+// Sinks carry their kind so a table named like a package reads
+// unambiguously; an entry point the MR added or removed says so, since
+// the row is otherwise a base fact.
+func shortList(ids []string, max int, status map[string]string) string {
+	if len(ids) == 0 {
+		return "—"
+	}
+	var parts []string
+	for i, id := range ids {
+		if i == max {
+			parts = append(parts, fmt.Sprintf("+%d", len(ids)-max))
+			break
+		}
+		name := graph.ShortName(id)
+		if graph.IDPrefix(id) == "sink" {
+			if p := strings.SplitN(id, ":", 3); len(p) == 3 {
+				name = p[1] + " " + p[2]
+			}
+		}
+		part := "`" + mdEsc(name) + "`"
+		switch status[id] {
+		case "added":
+			part += " (new)"
+		case "removed":
+			part += " (removed)"
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, ", ")
 }
 
 func fence(b *strings.Builder, src string) {

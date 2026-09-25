@@ -5,16 +5,41 @@ head does not compile: `acme/svc/broken` (2 changes hidden)
 
 `POST /orders` now reaches `orders`. `(*Service).Create` changed signature (3 callers).
 
-#### Dataflow
+#### Where this lands
+
+At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external module not drawn). This MR changes code in 1 of them and adds 1 new package.
+
+| package | symbols | this MR | imported by | reached from | talks to |
+|---|---|---|---|---|---|
+| [`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders) | 12 | 1 added, 1 changed | `api`, `billing`, `cron`, `export`, +1 | `POST /orders` (new) | `db orders` |
+| [`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util) | 3 | new package | `orders` | — | — |
 
 ```mermaid
 flowchart LR
   classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
-  classDef removed fill:#fff1f2,stroke:#dc2626,stroke-dasharray:5 3,color:#1f2937
-  classDef signature_changed fill:#fef3c7,stroke:#d97706,color:#1f2937
   classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
-  classDef query fill:#dbeafe,stroke:#2563eb,color:#1f2937
-  classDef more fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:2 2,color:#1f2937
+  classDef touched fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#1f2937
+  n30b7924f(["2 http routes"])
+  n7309427a[["orders"]]
+  n9cc466a4[["store"]]
+  na7fef5cf[["util"]]
+  n53798808[("db")]
+  n30b7924f --> n7309427a
+  n7309427a --> n9cc466a4
+  n7309427a --> na7fef5cf
+  n9cc466a4 --> n53798808
+  linkStyle 2 stroke:#16a34a,stroke-width:2px
+  class na7fef5cf added
+  class n30b7924f,n9cc466a4,n53798808 context
+  class n7309427a touched
+```
+Legend: purple changed by this MR, green added, red dashed removed, grey untouched; rounded entry points, cylinder sinks; arrows are imports; boxes are directories. 4 untouched packages folded into their directory to fit.
+
+#### Dataflow
+
+```mermaid
+flowchart LR
+  classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
   ndcb5c3a1(["POST /orders"])
   nc5b8bb09[("orders")]
   ndcb5c3a1 --> nc5b8bb09
@@ -27,11 +52,9 @@ flowchart LR
 ```mermaid
 flowchart LR
   classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
+  classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
   classDef removed fill:#fff1f2,stroke:#dc2626,stroke-dasharray:5 3,color:#1f2937
   classDef signature_changed fill:#fef3c7,stroke:#d97706,color:#1f2937
-  classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
-  classDef query fill:#dbeafe,stroke:#2563eb,color:#1f2937
-  classDef more fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:2 2,color:#1f2937
   subgraph sg2f27a5c6["orders"]
     na3c6eddb["(*Service).Create* (+3 callers)"]
     n7e4a7fe1["Handler"]
@@ -64,11 +87,6 @@ Legend: green added, red dashed removed, amber signature changed, grey context; 
 ```mermaid
 flowchart LR
   classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
-  classDef removed fill:#fff1f2,stroke:#dc2626,stroke-dasharray:5 3,color:#1f2937
-  classDef signature_changed fill:#fef3c7,stroke:#d97706,color:#1f2937
-  classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
-  classDef query fill:#dbeafe,stroke:#2563eb,color:#1f2937
-  classDef more fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:2 2,color:#1f2937
   subgraph sge40c292c["a"]
     na90b54ed["B"]
   end
@@ -81,11 +99,7 @@ flowchart LR
 ```mermaid
 flowchart LR
   classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
-  classDef removed fill:#fff1f2,stroke:#dc2626,stroke-dasharray:5 3,color:#1f2937
-  classDef signature_changed fill:#fef3c7,stroke:#d97706,color:#1f2937
   classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
-  classDef query fill:#dbeafe,stroke:#2563eb,color:#1f2937
-  classDef more fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:2 2,color:#1f2937
   n7309427a[["orders"]]
   na7fef5cf[["util"]]
   n7309427a --> na7fef5cf

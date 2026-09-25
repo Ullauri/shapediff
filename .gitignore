@@ -1,3 +1,4 @@
 bin/
 .shapediff-cache/
 shapediff/delta.json
+/shapediff

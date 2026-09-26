@@ -169,7 +169,7 @@ func TestNoteGolden(t *testing.T) {
 		"| package | symbols | this MR | imported by | reached from | talks to |",
 		"| [`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders) | 12 | 1 added, 1 changed | `api`, `billing`, `cron`, `export`, +1 | `POST /orders` (new) | `db orders` |",
 		"| [`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util) | 3 | new package | `orders` | — | — |",
-		"classDef touched", `(["2 http routes"])`, BaselineLegend + " 4 untouched packages folded into their directory to fit.", Legend, "#### Dataflow", "#### Call paths", "<details><summary>1 more call-path diagram", "**GET /x**", "#### Module wiring", "<details><summary>Details", "| node | status |", "[orders/v.go:7](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7)", "[util/o.go:1](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1)", "**Renames**", "`Old` → `Older` ?", "**Body-only changes**", "**Wide-reach changes**", "**Suppressed packages**", "2 nodes hidden by the budget", "**Warnings**", "vta took 41s", "extractor go-xtools 0.1.0 (typed, go1.26.0), base aaaaaaaa, head bbbbbbbb, 1.234s"}
+		Key(true, true), "classDef touched", `(["2 http routes"])`, "```\n4 untouched packages folded into their directory to fit.\n", "#### Dataflow", "#### Call paths", "<details><summary>1 more call-path diagram", "**GET /x**", "#### Module wiring", "<details><summary>Details", "| node | status |", "[orders/v.go:7](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7)", "[util/o.go:1](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1)", "**Renames**", "`Old` → `Older` ?", "**Body-only changes**", "**Wide-reach changes**", "**Suppressed packages**", "2 nodes hidden by the budget", "**Warnings**", "vta took 41s", "extractor go-xtools 0.1.0 (typed, go1.26.0), base aaaaaaaa, head bbbbbbbb, 1.234s"}
 	pos := 0
 	for _, o := range order {
 		i := strings.Index(got[pos:], o)
@@ -191,6 +191,17 @@ func TestNoteGolden(t *testing.T) {
 	if string(want) != got {
 		t.Errorf("note differs from golden; run with UPDATE_GOLDEN=1 to refresh\n%s", got)
 	}
+	if n := strings.Count(got, "**Key.**"); n != 1 {
+		t.Errorf("want one key in the note, got %d", n)
+	}
+	// Without the package map the key moves down to the first delta diagram
+	// and drops the map's clauses.
+	noMap := in
+	noMap.Baseline = nil
+	got, _ = Note(noMap)
+	if i, j := strings.Index(got, Key(false, true)), strings.Index(got, "#### Dataflow"); i < 0 || j < i {
+		t.Errorf("without a map the delta key should sit above the dataflow diagram:\n%s", got)
+	}
 	// fallback path
 	res.Fallback = true
 	got, _ = Note(in)
@@ -201,6 +212,31 @@ func TestNoteGolden(t *testing.T) {
 	}
 	if NoStructuralNote("bbbbbbbbbbbb") != Marker+"\nno structural change at bbbbbbbb\n" {
 		t.Error("no-structural note")
+	}
+}
+
+// The key names only what the note draws: purple and imports belong to the
+// package map, amber, `*` and the call arrows to the delta diagrams.
+func TestKey(t *testing.T) {
+	for _, c := range []struct {
+		pkgMap, delta bool
+		has, lacks    []string
+	}{
+		{true, true, []string{"purple", "amber", "an arrow is an import", "dynamic dispatch", "`*`"}, nil},
+		{false, true, []string{"amber", "dynamic dispatch", "`*`"}, []string{"purple", "import", "directory"}},
+		{true, false, []string{"purple", "an arrow is an import", "directory"}, []string{"amber", "dispatch", "`*`", "plain box"}},
+	} {
+		k := Key(c.pkgMap, c.delta)
+		for _, h := range c.has {
+			if !strings.Contains(k, h) {
+				t.Errorf("Key(%v, %v) lacks %q: %s", c.pkgMap, c.delta, h, k)
+			}
+		}
+		for _, l := range c.lacks {
+			if strings.Contains(k, l) {
+				t.Errorf("Key(%v, %v) should not say %q: %s", c.pkgMap, c.delta, l, k)
+			}
+		}
 	}
 }
 

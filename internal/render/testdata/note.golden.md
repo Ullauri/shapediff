@@ -14,6 +14,8 @@ At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external 
 | [`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders) | 12 | 1 added, 1 changed | `api`, `billing`, `cron`, `export`, +1 | `POST /orders` (new) | `db orders` |
 | [`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util) | 3 | new package | `orders` | — | — |
 
+**Key.** A rounded box is an entry point, a double-bordered box a package, a cylinder a data store, a plain box a function or definition. Green is added, red dashed removed, amber a changed signature, purple a package this MR changes code in, grey unchanged context drawn for orientation. Arrows take the same colours; a dotted arrow is an inferred call, a dashed one dynamic dispatch. In the package map an arrow is an import and an outer box a directory. `*` marks a definition whose body also changed, and `name +N more` is a group of N definitions drawn as one box.
+
 ```mermaid
 flowchart LR
   classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
@@ -33,9 +35,7 @@ flowchart LR
   class n30b7924f,n9cc466a4,n53798808 context
   class n7309427a touched
 ```
-Legend: purple changed by this MR, green added, red dashed removed, grey untouched; rounded entry points, cylinder sinks; arrows are imports; boxes are directories. 4 untouched packages folded into their directory to fit.
-
-**Key.** A rounded box is an entry point, a double-bordered box a package, a cylinder a data store, a plain box a function or definition. Green is added, red dashed removed, amber a changed signature, grey unchanged context drawn for orientation. Arrows take the same colours; a dotted arrow is an inferred call, a dashed one dynamic dispatch. `*` marks a definition whose body also changed, and `name +N more` is a group of N definitions drawn as one box.
+4 untouched packages folded into their directory to fit.
 
 #### Dataflow
 

@@ -61,14 +61,22 @@ func Note(in NoteInput) (string, error) {
 	if len(in.Sentences) > 0 {
 		b.WriteString("\n" + strings.Join(in.Sentences, " ") + "\n")
 	}
-	if in.Baseline != nil && (in.Baseline.Map != nil || len(in.Baseline.Touched) > 0) {
-		writeBaseline(&b, in)
-	}
 	// One key, above the first diagram. Under the call paths it was invisible
 	// to a reader of the dataflow diagram, and repeating it per diagram turns
 	// it into the kind of chrome section 11 warns reviewers learn to skip.
-	if in.Filter.Dataflow != nil || len(in.Filter.CallPaths) > 0 || in.Filter.Wiring != nil {
-		fmt.Fprintf(&b, "\n%s\n", Legend)
+	// The package map, when drawn, is the first diagram, so writeBaseline
+	// prints the key; otherwise it goes above the first delta diagram.
+	pkgMap := in.Baseline != nil && in.Baseline.Map != nil
+	delta := in.Filter.Dataflow != nil || len(in.Filter.CallPaths) > 0 || in.Filter.Wiring != nil
+	key := ""
+	if pkgMap || delta {
+		key = Key(pkgMap, delta)
+	}
+	if in.Baseline != nil && (in.Baseline.Map != nil || len(in.Baseline.Touched) > 0) {
+		writeBaseline(&b, in, key)
+	}
+	if delta && !pkgMap {
+		fmt.Fprintf(&b, "\n%s\n", key)
 	}
 	if in.Filter.Dataflow != nil {
 		b.WriteString("\n#### Dataflow\n\n")
@@ -111,16 +119,14 @@ func Note(in NoteInput) (string, error) {
 	return b.String(), nil
 }
 
-// BaselineLegend is the line printed under the baseline map.
-const BaselineLegend = "Legend: purple changed by this MR, green added, red dashed removed, grey untouched; rounded entry points, cylinder sinks; arrows are imports; boxes are directories."
-
 // writeBaseline is the "Where this lands" section (spec 10.1): one line
 // on the repo's size at the base, one row per package the MR changed
 // inside, then the package map with those packages highlighted. It is
 // written for a reader who does not know the repo: every name is a
 // package, an entry point or a sink, and every package links to its
-// directory at the base SHA.
-func writeBaseline(b *strings.Builder, in NoteInput) {
+// directory at the base SHA. key is the note's one key, printed above
+// the map when the map is drawn.
+func writeBaseline(b *strings.Builder, in NoteInput, key string) {
 	bl := in.Baseline
 	b.WriteString("\n#### Where this lands\n\n")
 	fmt.Fprintf(b, "At base %s the repo has %d %s, %d %s and %d %s",
@@ -185,9 +191,8 @@ func writeBaseline(b *strings.Builder, in NoteInput) {
 		}
 		return
 	}
-	b.WriteString("\n")
+	fmt.Fprintf(b, "\n%s\n\n", key)
 	fence(b, Mermaid(bl.Map))
-	b.WriteString(BaselineLegend)
 	var cut []string
 	if bl.Collapsed > 0 {
 		cut = append(cut, fmt.Sprintf("%d untouched %s folded into their directory", bl.Collapsed, plural(bl.Collapsed, "package", "packages")))
@@ -196,9 +201,8 @@ func writeBaseline(b *strings.Builder, in NoteInput) {
 		cut = append(cut, fmt.Sprintf("%d %s hidden", bl.Hidden, plural(bl.Hidden, "package", "packages")))
 	}
 	if len(cut) > 0 {
-		b.WriteString(" " + strings.Join(cut, " and ") + " to fit.")
+		b.WriteString(strings.Join(cut, " and ") + " to fit.\n")
 	}
-	b.WriteString("\n")
 }
 
 // shortList renders up to max names from IDs, then "+N"; "—" when empty.

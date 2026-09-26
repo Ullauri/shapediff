@@ -12,7 +12,7 @@ import (
 	"github.com/Ullauri/shapediff/internal/graph"
 )
 
-// Legend is the key printed once, above the first diagram in the note.
+// Key is the one key in the note, printed above its first diagram.
 //
 // It was previously printed under the call-path diagram and nowhere else, so
 // the dataflow diagram — the first one a reader meets, and often the only one
@@ -20,11 +20,41 @@ import (
 // the only place the node shapes are written down; they carry as much meaning
 // as the colours do. The key sits outside the Mermaid fence, so it costs
 // nothing against the character budget of section 9.
-const Legend = "**Key.** A rounded box is an entry point, a double-bordered box a package, " +
-	"a cylinder a data store, a plain box a function or definition. " +
-	"Green is added, red dashed removed, amber a changed signature, grey unchanged context drawn for orientation. " +
-	"Arrows take the same colours; a dotted arrow is an inferred call, a dashed one dynamic dispatch. " +
-	"`*` marks a definition whose body also changed, and `name +N more` is a group of N definitions drawn as one box."
+//
+// It covers the baseline package map of section 10.1 as well as the delta
+// diagrams. The two share their shapes and most of their colours, and a map
+// legend printed directly above the delta key was the per-diagram chrome the
+// single key had replaced. A clause that describes only one kind of diagram
+// is written only when that kind is drawn: pkgMap for the package map, delta
+// for any of dataflow, call paths or module wiring.
+func Key(pkgMap, delta bool) string {
+	var b strings.Builder
+	b.WriteString("**Key.** A rounded box is an entry point, a double-bordered box a package, a cylinder a data store")
+	if delta {
+		b.WriteString(", a plain box a function or definition")
+	}
+	b.WriteString(". Green is added, red dashed removed")
+	if delta {
+		b.WriteString(", amber a changed signature")
+	}
+	if pkgMap {
+		b.WriteString(", purple a package this MR changes code in")
+	}
+	b.WriteString(", grey unchanged context drawn for orientation.")
+	switch {
+	case delta && pkgMap:
+		b.WriteString(" Arrows take the same colours; a dotted arrow is an inferred call, a dashed one dynamic dispatch." +
+			" In the package map an arrow is an import and an outer box a directory.")
+	case delta:
+		b.WriteString(" Arrows take the same colours; a dotted arrow is an inferred call, a dashed one dynamic dispatch.")
+	case pkgMap:
+		b.WriteString(" Arrows take the same colours; an arrow is an import and an outer box a directory.")
+	}
+	if delta {
+		b.WriteString(" `*` marks a definition whose body also changed, and `name +N more` is a group of N definitions drawn as one box.")
+	}
+	return b.String()
+}
 
 // classDefs is the styling preamble, one line per class, emitted only for
 // the classes a diagram uses because every line counts against the

@@ -25,6 +25,8 @@ func TestBaselineRowsAndMap(t *testing.T) {
 	}
 	row := bl.Touched[0]
 	want := TouchedPackage{ID: "pkg:acme/svc/orders", Label: "orders", Status: StatusTouched, Dir: "acme/svc/orders", Symbols: 3, Added: 1,
+		Kinds: map[string]int{"func": 1, "method": 1, "type": 1}, AddedIDs: []string{"sym:acme/svc/orders.Validate"},
+		RemovedIDs: []string{}, SignatureIDs: []string{}, BodyIDs: []string{}, RenamedIDs: []string{},
 		ImportedBy: []string{}, Entrypoints: []string{"entry:http:POST /orders"}, Sinks: []string{}}
 	if !reflect.DeepEqual(row, want) {
 		t.Errorf("row = %+v\nwant %+v", row, want)
@@ -339,5 +341,35 @@ func TestCommonRoot(t *testing.T) {
 		if got := commonRoot(c.in); got != c.want {
 			t.Errorf("commonRoot(%v) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// TestBaselineNamesProgramBeforeTests: the row names what the MR added, and
+// a reviewer reads the program's changes before its tests'.
+func TestBaselineNamesProgramBeforeTests(t *testing.T) {
+	build := func(withCode bool) *graph.Index {
+		g := newGB().pkg("acme/svc/orders")
+		g.sym("acme/svc/orders", "Handler", "func")
+		if withCode {
+			g.sym("acme/svc/orders", "Zap", "func")
+			g.testSym("acme/svc/orders", "TestAll")
+		}
+		return g.index()
+	}
+	base, head := build(false), build(true)
+	d := newDelta()
+	d.Nodes.Added = []string{graph.SymID("acme/svc/orders", "TestAll"), graph.SymID("acme/svc/orders", "Zap")}
+	d.Nodes.BodyChanged = []string{graph.SymID("acme/svc/orders", "Handler")}
+	d.Canonicalize()
+	bl := BaselineView(d, head, base, Options{Budget: defaultBudget()})
+	if len(bl.Touched) != 1 {
+		t.Fatalf("touched = %+v", bl.Touched)
+	}
+	r := bl.Touched[0]
+	if want := []string{graph.SymID("acme/svc/orders", "Zap"), graph.SymID("acme/svc/orders", "TestAll")}; !reflect.DeepEqual(r.AddedIDs, want) {
+		t.Errorf("added = %v, want %v", r.AddedIDs, want)
+	}
+	if want := []string{graph.SymID("acme/svc/orders", "Handler")}; !reflect.DeepEqual(r.BodyIDs, want) || len(r.SignatureIDs) != 0 || r.Changed != 1 {
+		t.Errorf("body = %v, signature = %v, changed = %d", r.BodyIDs, r.SignatureIDs, r.Changed)
 	}
 }

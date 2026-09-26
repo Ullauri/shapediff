@@ -243,13 +243,7 @@ func labelIn(n filter.Node, names map[string]string) string {
 func shortPkg(p string) string { return suffix(p, 1) }
 
 // suffix returns the last n path segments of p.
-func suffix(p string, n int) string {
-	parts := strings.Split(p, "/")
-	if n >= len(parts) {
-		return p
-	}
-	return strings.Join(parts[len(parts)-n:], "/")
-}
+func suffix(p string, n int) string { return graph.PathSuffix(p, n) }
 
 func pickName(names map[string]string, pkg string) string {
 	if l, ok := names[graph.PkgID(pkg)]; ok {
@@ -288,28 +282,10 @@ func shortNamesOf(dgs ...*filter.Diagram) map[string]string {
 	for p := range paths {
 		all = append(all, p)
 	}
-	sort.Strings(all)
 	out := map[string]string{}
-	for _, p := range all {
-		depth := 1
-		for {
-			label := suffix(p, depth)
-			clash := false
-			for _, q := range all {
-				if q != p && suffix(q, depth) == label {
-					clash = true
-					break
-				}
-			}
-			// Stop widening when the whole path is on show: two distinct
-			// packages cannot share one, so this always terminates.
-			if !clash || label == p {
-				out[p] = label
-				out[graph.PkgID(p)] = label
-				break
-			}
-			depth++
-		}
+	for p, label := range graph.UniqueSuffixes(all) {
+		out[p] = label
+		out[graph.PkgID(p)] = label
 	}
 	return out
 }

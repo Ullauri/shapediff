@@ -663,7 +663,7 @@ output section 3 forbids. So:
   A node with no package (a sink) is suppressed when every edge touching
   it comes from a suppressed package; an entrypoint is under its
   registration site's package (section 6.1).
-- The headline says so in one line: "head does not compile:
+- The note says so in one line at its top: "head does not compile:
   `internal/orders` (14 changes hidden)". Not a generic extraction failure,
   because reviewers will learn to ignore a generic one.
 - Reachability is computed only over packages `ok` in both graphs; an
@@ -865,13 +865,19 @@ diagram (section 14.1), and has three parts, all read from the base graph
    SHA, and how many external modules are not drawn, then how many
    packages the MR changes code in. The base SHA is printed: it is the
    identity of the baseline.
-2. **One table row per touched package** (section 9's definition):
-   symbol count at the base; what the MR did there (added, removed,
-   changed, renamed counts, or "new package" / "removed"); which internal
-   packages import it (the blast radius); which entry points reach it
-   narrowly (section 7.4) or are registered in it; which sinks its symbols
-   read or write. Lists are cut at four names plus "+N". Each package
-   links to its directory tree at the base SHA.
+2. **One list item per touched package** (section 9's definition), not a
+   table row: its size at the base counted by kind ("96 functions, 40
+   methods, 17 types and 3 constants", every kind, since "others" would
+   say no more than "symbols" did); then one
+   line per kind of change, the count with the definitions it names ("19
+   added: `QuizHandler`, `GetQuiz`, ... and 13 more", five names, program
+   code before tests), a changed definition split into "changed signature"
+   and "edited, same signature", or "new package" / "removed package" in
+   place of the count; then which internal packages import it (the blast
+   radius), which entry points reach it narrowly (section 7.4) or are
+   registered in it, and which sinks its symbols read or write, each cut
+   at four names plus "+N". A line with nothing to say is left out. Each
+   package links to its directory tree at the base SHA.
 3. **The package map**: every internal package as a node, boxed by
    directory (the parent path relative to the packages' common root),
    import edges among them, one node per (package, entry kind) labelled
@@ -1117,12 +1123,22 @@ Stacks after the third go in one collapsed section.
 
 ## 11. Narration
 
-Narration in v1 is a **deterministic template** over the delta. Eight
-sentence templates, one per fact class, in this order: entrypoint reach
-changes; signature changes and their caller counts; renames; module
-wiring; count of body-only changes; suppressed packages. Each template
-takes IDs from the delta, so every sentence is a claim the diagram also
-makes. The headline line in section 14.1 is the first of these templates.
+Narration in v1 is a **deterministic template** over the delta. One
+sentence template per fact class, in this order: entry points added,
+removed and whose reach changed; signature changes and their caller
+counts; renames; definitions added and removed; packages and module
+wiring; body-only changes; suppressed packages. Each template takes IDs
+from the delta, so every sentence is a claim the diagram also makes.
+
+Each template is written twice from the same facts. As a **sentence**, it
+is what the rewrite below is given and what its claims are checked
+against. As a **list item**, it is what the note prints (section 14.1): a
+bold count, by kind where it counts definitions ("3 functions and 1 type
+added"), with the names nested under it one per line, up to eight and then
+"and N more". Test code is counted apart and not named. A rewritten
+sentence replaces its list item. The list form of a fact already on the
+page is empty: an added endpoint's reach is nested under the endpoint, and
+the suppression line stands at the top of the note.
 This ships in phase 3, so the note is tested complete.
 
 An **optional LLM rewrite** (phase 4) may replace the templated paragraph
@@ -1147,7 +1163,8 @@ only under validators enforced after generation, not by prompting:
 
 Backend for the rewrite: any OpenAI-compatible endpoint, configured per
 instance. A local model on the CI host is acceptable; the input is
-structured and small. Phase 4's gate is an A/B against the template: if
+structured and small. The rewrite is offered the first eight template
+sentences; any past the eighth stay as the template wrote them. Phase 4's gate is an A/B against the template: if
 reviewers do not prefer the rewrite, the LLM, its endpoint and its
 configuration never ship.
 
@@ -1271,10 +1288,15 @@ branch-only pipelines never fire that event. Steps:
 
 Note layout, top to bottom:
 
-- One headline line: `1 endpoint added, 2 endpoints' reach changed, 1
-  signature changed (4 callers), 0 packages added.` Followed, when
-  applicable, by the suppression line from section 8.4.
-- Narration, up to eight sentences.
+- **What changed**: the suppression line from section 8.4 when there is
+  one; then the narration of section 11 in its list form, one item per
+  fact class, each a bold count with what it counts named under it, one
+  per line; then one line naming which of the four standing counts
+  (endpoints added, endpoints' reach changed, signatures changed, packages
+  added) are zero: `No endpoint's reach changed and no package was
+  added.` A zero is news to a reviewer, so it is said, but in one line and
+  not as four list items. With `narration: off` the counts stay and the
+  names under them go.
 - "Where this lands" (section 10.1): the size line, the touched-package
   table and the package map. Before the diagrams, because it is the frame
   they are read in; after the narration, because the reviewer who knows
@@ -1730,3 +1752,25 @@ details table and sent back the rest as a wall of text:
   on one, `list()`/`next()` of those, an index into them or a loop over
   them; a value merely built from rows, such as a response model, is not
   one.
+
+Third pass, 2026-09-26, the owner's review of the notes for homechan,
+devlogplus !27 and curriculumcompass !4. Everything that had to be read
+across went down the page:
+
+- **The headline and narration are one list** (sections 11 and 14.1). The
+  headline was a line of four counts and the narration a paragraph naming
+  what they counted, so a reader went across both to learn what "5
+  endpoints added" were. Each fact class is now a bold count with the names
+  under it, one per line; the zero counts are one line under the list.
+- **Definitions added and removed are a fact class** (section 11). An MR
+  that added a job handler, and nothing a route reaches, had a headline of
+  zeros and one line about two edited bodies; the thirteen new definitions
+  were not mentioned before the diagrams.
+- **"symbols" is gone from the note** (sections 10.1 and 11). The reader
+  did not know what it meant. Counts say what they count, by kind: "96
+  functions, 40 methods and 17 types", "2 functions edited with the same
+  signature".
+- **The touched-package table is a list** (section 10.1), one item per
+  package, naming what was added, removed, renamed or changed there rather
+  than counting it. The six columns wrapped to a word a line at note width,
+  and "3 added, 1 changed" did not say what was added.

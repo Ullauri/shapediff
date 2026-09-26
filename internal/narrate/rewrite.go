@@ -24,18 +24,20 @@ type Client interface {
 // Rewrite asks the client for fluent replacements and accepts each template
 // sentence's replacement only when every claim made for it validates. A
 // rejected or missing replacement keeps the template sentence, so the
-// result has exactly as many sentences as the template, at most eight.
+// result has exactly as many sentences as the template. Only the first
+// MaxSentences are offered; the rest stay as the template wrote them.
 // A client error keeps the whole template; the error is returned so the
 // caller can warn.
 func Rewrite(ctx context.Context, client Client, sentences []Sentence, d *delta.Delta, head, base *graph.Index) ([]Sentence, error) {
 	out := append([]Sentence(nil), sentences...)
-	if len(out) > MaxSentences {
-		out = out[:MaxSentences]
+	offered := len(out)
+	if offered > MaxSentences {
+		offered = MaxSentences
 	}
-	if client == nil || len(out) == 0 {
+	if client == nil || offered == 0 {
 		return out, nil
 	}
-	user, err := prompt(out, d)
+	user, err := prompt(out[:offered], d)
 	if err != nil {
 		return out, err
 	}
@@ -53,7 +55,7 @@ func Rewrite(ctx context.Context, client Client, sentences []Sentence, d *delta.
 	}
 	sort.Ints(idx)
 	for _, i := range idx {
-		if i < 0 || i >= len(out) {
+		if i < 0 || i >= offered {
 			continue
 		}
 		cs := byIndex[i]

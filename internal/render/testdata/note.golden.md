@@ -1,18 +1,27 @@
 <!-- shapediff:v1 -->
-**0 endpoints added, 1 endpoint's reach changed, 1 signature changed (3 callers), 1 package added.**
+#### What changed
 
 head does not compile: `acme/svc/broken` (2 changes hidden)
 
-`POST /orders` now reaches `orders`. `(*Service).Create` changed signature (3 callers).
+- **1 endpoint's reach changed**
+  - `POST /orders` now also reaches `orders` (db sink)
+- **1 signature changed**, 3 callers in all
+  - `(*Service).Create` in `orders`, 3 callers
+
+No endpoint was added.
 
 #### Where this lands
 
 At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external module not drawn). This MR changes code in 1 of them and adds 1 new package.
 
-| package | symbols | this MR | imported by | reached from | talks to |
-|---|---|---|---|---|---|
-| [`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders) | 12 | 1 added, 1 changed | `api`, `billing`, `cron`, `export`, +1 | `POST /orders` (new) | `db orders` |
-| [`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util) | 3 | new package | `orders` | — | — |
+- **[`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders)**: 7 functions, 3 methods and 2 types
+  - 1 added: `Validate`
+  - 1 changed signature: `(*Service).Create`
+  - Imported by `api`, `billing`, `cron`, `export`, +1
+  - Reached from `POST /orders` (new)
+  - Talks to `db orders`
+- **[`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util)**: new package, 3 functions
+  - Imported by `orders`
 
 **Key**
 

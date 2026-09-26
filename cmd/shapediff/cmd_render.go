@@ -29,9 +29,10 @@ func renderNote(d *delta.Delta, head, base *graph.Index, cfg *config.Config, pro
 	opts := filter.Options{Budget: budget, Measure: func(dg *filter.Diagram) int { return len(render.Mermaid(dg)) }}
 	res := filter.Apply(d, head, base, opts)
 
-	var texts []string
+	// The summary list comes from the template even with narration off:
+	// its counts are the headline. Off drops the names under each count.
+	sentences := narrate.Template(d, head, base)
 	if cfg.Narration != "off" {
-		sentences := narrate.Template(d, head, base)
 		if cfg.Narration == "llm" {
 			if cfg.LLM.Endpoint == "" {
 				warnings = append(warnings, "narration: llm requested but no llm.endpoint configured; using the template")
@@ -46,8 +47,18 @@ func renderNote(d *delta.Delta, head, base *graph.Index, cfg *config.Config, pro
 				sentences = rewritten
 			}
 		}
-		for _, s := range sentences {
-			texts = append(texts, s.Text)
+	}
+	var summary []render.SummaryItem
+	for _, s := range sentences {
+		switch {
+		case s.Rewritten:
+			summary = append(summary, render.SummaryItem{Text: s.Text})
+		case s.Lead == "":
+			// said elsewhere on the page (see narrate.Sentence)
+		case cfg.Narration == "off":
+			summary = append(summary, render.SummaryItem{Text: s.Lead})
+		default:
+			summary = append(summary, render.SummaryItem{Text: s.Lead, Items: s.Items})
 		}
 	}
 	var bl *filter.Baseline
@@ -56,7 +67,7 @@ func renderNote(d *delta.Delta, head, base *graph.Index, cfg *config.Config, pro
 	}
 	note, err := render.Note(render.NoteInput{
 		Delta: d, Head: head, Base: base, Filter: res, Baseline: bl,
-		Headline: narrate.Headline(d), Suppression: narrate.SuppressionLine(d), Sentences: texts,
+		Summary: summary, Unchanged: narrate.Unchanged(d), Suppression: narrate.SuppressionLine(d),
 		ProjectURL: projectURL, WeeklyURL: cfg.WeeklyURL, HeadSHA: d.HeadSHA, BaseSHA: d.BaseSHA, MRIID: d.MRIID,
 		Extractor: head.Doc.Extractor, Elapsed: time.Since(started),
 	})

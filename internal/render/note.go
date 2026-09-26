@@ -21,10 +21,14 @@ type NoteInput struct {
 	Head, Base *graph.Index
 	Filter     *filter.Result
 	// Baseline is the "where this lands" view; nil leaves the section out.
-	Baseline    *filter.Baseline
-	Headline    string
+	Baseline *filter.Baseline
+	// Summary is the "What changed" list at the top of the note (section
+	// 14.1): one item per fact class, each a bold count with the names under
+	// it. Unchanged is the line under it naming the standing counts that are
+	// zero.
+	Summary     []SummaryItem
+	Unchanged   string
 	Suppression string
-	Sentences   []string
 	ProjectURL  string // e.g. https://gitlab.example.com/group/svc, "" disables permalinks
 	// WeeklyURL is the weekly structure brief (section 14.2). When set, the
 	// note ends with a pointer to it, for the reader who is behind on the
@@ -41,6 +45,13 @@ type NoteInput struct {
 	FallbackText string
 }
 
+// SummaryItem is one item of the "What changed" list: Text, then Items
+// nested under it, one per line.
+type SummaryItem struct {
+	Text  string
+	Items []string
+}
+
 // NoStructuralNote is the one-line body used when a later push removed all
 // structural change from an MR that already has a note.
 func NoStructuralNote(headSHA string) string {
@@ -54,13 +65,7 @@ func Note(in NoteInput) (string, error) {
 	}
 	var b strings.Builder
 	b.WriteString(Marker + "\n")
-	fmt.Fprintf(&b, "**%s**\n", in.Headline)
-	if in.Suppression != "" {
-		fmt.Fprintf(&b, "\n%s\n", in.Suppression)
-	}
-	if len(in.Sentences) > 0 {
-		b.WriteString("\n" + strings.Join(in.Sentences, " ") + "\n")
-	}
+	writeSummary(&b, in)
 	// One key, above the first diagram. Under the call paths it was invisible
 	// to a reader of the dataflow diagram, and repeating it per diagram turns
 	// it into the kind of chrome section 11 warns reviewers learn to skip.
@@ -143,6 +148,28 @@ func Note(in NoteInput) (string, error) {
 	return b.String(), nil
 }
 
+// writeSummary is the top of the note: what changed, as a list. It was a
+// line of counts and a paragraph naming the changes, and both had to be
+// read across to find anything; a list is scanned down.
+func writeSummary(b *strings.Builder, in NoteInput) {
+	b.WriteString("#### What changed\n")
+	if in.Suppression != "" {
+		fmt.Fprintf(b, "\n%s\n", in.Suppression)
+	}
+	if len(in.Summary) > 0 {
+		b.WriteString("\n")
+		for _, s := range in.Summary {
+			fmt.Fprintf(b, "- %s\n", s.Text)
+			for _, it := range s.Items {
+				fmt.Fprintf(b, "  - %s\n", it)
+			}
+		}
+	}
+	if in.Unchanged != "" {
+		fmt.Fprintf(b, "\n%s\n", in.Unchanged)
+	}
+}
+
 // writeBaseline is the "Where this lands" section (spec 10.1): one line
 // on the repo's size at the base, one row per package the MR changed
 // inside, then the package map with those packages highlighted. It is
@@ -179,34 +206,12 @@ func writeBaseline(b *strings.Builder, in NoteInput, key string) {
 		fmt.Fprintf(b, ". This MR changes code in %d of them and adds %d new %s.\n", changed, added, plural(added, "package", "packages"))
 	}
 	if len(bl.Touched) > 0 {
-		b.WriteString("\n| package | symbols | this MR | imported by | reached from | talks to |\n|---|---|---|---|---|---|\n")
+		// One list item per package, not a table row: six columns wrapped
+		// to a word a line at note width, and a count ("3 added") did not
+		// say what was added.
+		b.WriteString("\n")
 		for _, t := range bl.Touched {
-			name := "`" + mdEsc(t.Label) + "`"
-			if t.Dir != "" && in.ProjectURL != "" {
-				sha := in.BaseSHA
-				if t.Status == filter.StatusAdded {
-					sha = in.HeadSHA
-				}
-				name = fmt.Sprintf("[%s](%s/-/tree/%s/%s)", name, strings.TrimRight(in.ProjectURL, "/"), sha, t.Dir)
-			}
-			var did []string
-			switch t.Status {
-			case filter.StatusAdded:
-				did = append(did, "new package")
-			case filter.StatusRemoved:
-				did = append(did, "removed")
-			}
-			for _, c := range []struct {
-				n    int
-				what string
-			}{{t.Added, "added"}, {t.Removed, "removed"}, {t.Changed, "changed"}, {t.Renamed, "renamed"}} {
-				// "new package" and "removed" already say where every symbol went
-				if c.n == 0 || (t.Status == filter.StatusAdded && c.what == "added") || (t.Status == filter.StatusRemoved && c.what == "removed") {
-					continue
-				}
-				did = append(did, fmt.Sprintf("%d %s", c.n, c.what))
-			}
-			fmt.Fprintf(b, "| %s | %d | %s | %s | %s | %s |\n", name, t.Symbols, strings.Join(did, ", "), shortList(t.ImportedBy, 4, nil), shortList(t.Entrypoints, 4, bl.EntryStatus), shortList(t.Sinks, 4, nil))
+			writeTouched(b, in, t)
 		}
 	}
 	if bl.Map == nil {
@@ -227,6 +232,98 @@ func writeBaseline(b *strings.Builder, in NoteInput, key string) {
 	if len(cut) > 0 {
 		b.WriteString(strings.Join(cut, " and ") + " to fit.\n")
 	}
+}
+
+// maxNamed is how many definitions a package's list item names per kind
+// of change before "and N more".
+const maxNamed = 5
+
+// writeTouched is one package of "Where this lands": its name and size,
+// then one line per kind of change naming what changed, then who depends
+// on it and what it talks to. A line with nothing to say is left out.
+func writeTouched(b *strings.Builder, in NoteInput, t filter.TouchedPackage) {
+	name := "`" + mdEsc(t.Label) + "`"
+	if t.Dir != "" && in.ProjectURL != "" {
+		sha := in.BaseSHA
+		if t.Status == filter.StatusAdded {
+			sha = in.HeadSHA
+		}
+		name = fmt.Sprintf("[%s](%s/-/tree/%s/%s)", name, strings.TrimRight(in.ProjectURL, "/"), sha, t.Dir)
+	}
+	size := graph.DescribeKinds(t.Kinds, 0)
+	if size == "" {
+		size = fmt.Sprintf("%d %s", t.Symbols, plural(t.Symbols, "definition", "definitions"))
+	}
+	switch t.Status {
+	case filter.StatusAdded:
+		size = "new package, " + size
+	case filter.StatusRemoved:
+		size = "removed package, " + size + " at base"
+	}
+	fmt.Fprintf(b, "- **%s**: %s\n", name, size)
+	type change struct {
+		n    int
+		ids  []string
+		what string
+	}
+	var changes []change
+	// "new package" and "removed package" already say where every
+	// definition went.
+	if t.Status != filter.StatusAdded {
+		changes = append(changes, change{t.Added, t.AddedIDs, "added"})
+	}
+	if t.Status != filter.StatusRemoved {
+		changes = append(changes, change{t.Removed, t.RemovedIDs, "removed"})
+	}
+	changes = append(changes, change{t.Renamed, t.RenamedIDs, "renamed"})
+	if len(t.SignatureIDs)+len(t.BodyIDs) > 0 {
+		changes = append(changes, change{len(t.SignatureIDs), t.SignatureIDs, "changed signature"},
+			change{len(t.BodyIDs), t.BodyIDs, "edited, same signature"})
+	} else {
+		changes = append(changes, change{t.Changed, nil, "changed"})
+	}
+	for _, c := range changes {
+		if c.n == 0 {
+			continue
+		}
+		line := fmt.Sprintf("%d %s", c.n, c.what)
+		if names := namedList(c.ids, t.RenamedFrom); names != "" {
+			line += ": " + names
+		}
+		fmt.Fprintf(b, "  - %s\n", line)
+	}
+	for _, r := range []struct {
+		label string
+		ids   []string
+		entry bool
+	}{{"Imported by", t.ImportedBy, false}, {"Reached from", t.Entrypoints, true}, {"Talks to", t.Sinks, false}} {
+		if len(r.ids) == 0 {
+			continue
+		}
+		var status map[string]string
+		if r.entry {
+			status = in.Baseline.EntryStatus
+		}
+		fmt.Fprintf(b, "  - %s %s\n", r.label, shortList(r.ids, 4, status))
+	}
+}
+
+// namedList names up to maxNamed definitions, "`Old` → `New`" for a
+// rename, then "and N more".
+func namedList(ids []string, from map[string]string) string {
+	var parts []string
+	for i, id := range ids {
+		if i == maxNamed {
+			parts = append(parts, fmt.Sprintf("and %d more", len(ids)-maxNamed))
+			break
+		}
+		part := "`" + mdEsc(graph.ShortName(id)) + "`"
+		if f, ok := from[id]; ok {
+			part = "`" + mdEsc(graph.ShortName(f)) + "` → " + part
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // shortList renders up to max names from IDs, then "+N"; "—" when empty.

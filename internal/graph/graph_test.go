@@ -145,3 +145,22 @@ func TestSketch(t *testing.T) {
 		t.Errorf("far = %v", j)
 	}
 }
+
+func TestDescribeKinds(t *testing.T) {
+	for _, c := range []struct {
+		counts map[string]int
+		max    int
+		want   string
+	}{
+		{map[string]int{}, 0, ""},
+		{map[string]int{"func": 1}, 0, "1 function"},
+		{map[string]int{"type": 2, "func": 3, "const": 2}, 0, "3 functions, 2 types and 2 constants"},
+		{map[string]int{"func": 470, "method": 295, "type": 209, "const": 45, "interface": 25, "var": 14}, 3, "470 functions, 295 methods, 209 types and 84 others"},
+		{map[string]int{"": 2}, 0, "2 definitions"},
+		{map[string]int{"module": 1, "func": 1}, 0, "1 function and 1 other"},
+	} {
+		if got := DescribeKinds(c.counts, c.max); got != c.want {
+			t.Errorf("DescribeKinds(%v, %d) = %q, want %q", c.counts, c.max, got, c.want)
+		}
+	}
+}

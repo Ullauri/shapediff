@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -53,24 +54,89 @@ func fullDelta() *delta.Delta {
 	return d
 }
 
-func TestHeadline(t *testing.T) {
+func TestUnchanged(t *testing.T) {
 	d := fullDelta()
-	got := Headline(d)
-	want := "1 endpoint added, 2 endpoints' reach changed, 1 signature changed (4 callers), 0 packages added."
-	if got != want {
+	if got, want := Unchanged(d), "No package was added."; got != want {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}
-	d.Stats = delta.Stats{EntrypointsAdded: 2, EntrypointsReachChanged: 1, SignaturesChanged: 3, SignatureCallers: 1, PackagesAdded: 1, PackagesRemoved: 1, EntrypointsRemoved: 1}
-	got = Headline(d)
-	want = "2 endpoints added, 1 endpoint's reach changed, 3 signatures changed (1 caller), 1 package added, 1 endpoint removed, 1 package removed."
-	if got != want {
+	d.Stats = delta.Stats{SignaturesChanged: 1}
+	if got, want := Unchanged(d), "No endpoint was added, no endpoint's reach changed and no package was added."; got != want {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}
+	d.Stats = delta.Stats{EntrypointsAdded: 1, EntrypointsReachChanged: 1, SignaturesChanged: 1, PackagesAdded: 1}
+	if got := Unchanged(d); got != "" {
+		t.Errorf("nothing is unchanged, got %q", got)
+	}
+	d = fullDelta()
 	if s := SuppressionLine(d); s != "head does not compile: `a/broken` (14 changes hidden)" {
 		t.Errorf("suppression = %q", s)
 	}
 	if SuppressionLine(&delta.Delta{}) != "" {
 		t.Error("no suppression expected")
+	}
+}
+
+// TestTemplateListForm is the note's reading of the template: a bold count
+// per fact class with the names under it, one per line.
+func TestTemplateListForm(t *testing.T) {
+	d := fullDelta()
+	head := headIndex()
+	var got []string
+	for _, s := range Template(d, head, head) {
+		if s.Lead == "" {
+			continue
+		}
+		got = append(got, s.Lead)
+		for _, it := range s.Items {
+			got = append(got, "  "+it)
+		}
+	}
+	want := []string{
+		"**1 endpoint added**",
+		"  `POST /orders`, which reaches `orders` (db sink)",
+		"**1 endpoint removed**",
+		"  `Old/Do`",
+		"**1 endpoint's reach changed**",
+		"  `GET /orders` now also reaches `cache`; no longer reaches `audit` (queue sink)",
+		"**1 signature changed**, 2 callers in all",
+		"  `Target` in `p`, 2 callers",
+		"**1 definition renamed**",
+		"  `Old` → `New` (probably)",
+		"**1 definition added**",
+		"  `Fresh` in `p`",
+		"**1 package added**",
+		"  `cache` (new)",
+		"**1 import change**",
+		"  `p` now imports `cache`",
+		"**2 functions edited** with the same signature",
+		"  `CallerA` in `p`",
+		"  `CallerB` in `p`",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestWhererWidensClashingPackages: two packages that end in the same
+// segment are named by enough of their path to tell them apart.
+func TestWhererWidensClashingPackages(t *testing.T) {
+	ids := []string{"sym:app/routers/pipelines.dismiss", "sym:app/services/pipelines.dismiss", "sym:app/store.Get"}
+	where := wherer(ids, nil)
+	got := []string{where(ids[0]), where(ids[1]), where(ids[2])}
+	want := []string{"`dismiss` in `routers/pipelines`", "`dismiss` in `services/pipelines`", "`Get` in `store`"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+}
+
+func TestItemsCap(t *testing.T) {
+	var ids []string
+	for i := 0; i < MaxItems+3; i++ {
+		ids = append(ids, fmt.Sprintf("entry:http:GET /r%02d", i))
+	}
+	got := items(ids, name)
+	if len(got) != MaxItems+1 || got[MaxItems] != "and 3 more" {
+		t.Errorf("items = %q", got)
 	}
 }
 
@@ -88,9 +154,11 @@ func TestTemplateOrderAndClaims(t *testing.T) {
 		"`GET /orders` now reaches `cache`; `GET /orders` no longer reaches `audit` (queue sink); `POST /orders` now reaches `orders` (db sink).",
 		"`Target` changed signature (2 callers).",
 		"`Old` renamed to `New` (probably).",
+		"`Fresh` is added.",
 		"package `cache` is added.",
 		"`p` now imports `cache`.",
 		"2 symbols changed body only.",
+		"Changes under `broken` are hidden because the package does not type-check at base or head.",
 	}
 	if len(texts) != len(want) {
 		t.Fatalf("got %d sentences:\n%s", len(texts), strings.Join(texts, "\n"))
@@ -100,7 +168,7 @@ func TestTemplateOrderAndClaims(t *testing.T) {
 			t.Errorf("sentence %d:\n got %q\nwant %q", i, texts[i], want[i])
 		}
 	}
-	// the ninth (suppressed) is cut by the cap of eight; with fewer classes it appears
+	// one sentence per class and no cap: suppression is never cut
 	d2 := &delta.Delta{SchemaVersion: 1, Suppressed: d.Suppressed}
 	d2.Canonicalize()
 	ss = Template(d2, head, head)

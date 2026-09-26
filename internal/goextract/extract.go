@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/constant"
+	"go/doc"
 	"go/token"
 	"go/types"
 	"os"
@@ -348,6 +349,7 @@ func (x *extractor) fileNodes(p *packages.Package, f *ast.File, filename string)
 			n := base(qual, kind, d.Pos())
 			n.ID = graph.SymID(p.PkgPath, qual)
 			n.Attrs.Exported = token.IsExported(d.Name.Name)
+			n.Attrs.Doc = synopsis(d.Doc)
 			if obj, ok := p.TypesInfo.Defs[d.Name].(*types.Func); ok && obj != nil {
 				n.Attrs.Signature = signatureString(obj, p.Types)
 				x.funcIDs[obj] = n.ID
@@ -388,6 +390,7 @@ func (x *extractor) fileNodes(p *packages.Package, f *ast.File, filename string)
 					}
 					n := base(s.Name.Name, kind, s.Pos())
 					n.ID = graph.SymID(p.PkgPath, s.Name.Name)
+					n.Attrs.Doc = specDoc(s.Doc, d)
 					if obj, ok := p.TypesInfo.Defs[s.Name].(*types.TypeName); ok && obj != nil {
 						n.Attrs.Signature = typeSignature(obj, p.Types)
 					} else {
@@ -405,6 +408,7 @@ func (x *extractor) fileNodes(p *packages.Package, f *ast.File, filename string)
 						}
 						n := base(id.Name, kind, id.Pos())
 						n.ID = graph.SymID(p.PkgPath, id.Name)
+						n.Attrs.Doc = specDoc(s.Doc, d)
 						if obj := p.TypesInfo.Defs[id]; obj != nil && obj.Type() != nil {
 							n.Attrs.Signature = types.TypeString(obj.Type(), func(q *types.Package) string {
 								if q == p.Types {
@@ -1263,3 +1267,33 @@ func (x *extractor) document(ctx context.Context) (*graph.Document, error) {
 }
 
 func unquote(s string) (string, error) { return strconv.Unquote(s) }
+
+// docCap bounds the doc attr. It is a line under a name in the MR note,
+// not documentation.
+const docCap = 160
+
+// synopsis is the doc attr: the first sentence of a doc comment, cut to
+// docCap runes.
+func synopsis(cg *ast.CommentGroup) string {
+	if cg == nil {
+		return ""
+	}
+	s := new(doc.Package).Synopsis(cg.Text())
+	if r := []rune(s); len(r) > docCap {
+		s = strings.TrimSpace(string(r[:docCap-1])) + "…"
+	}
+	return s
+}
+
+// specDoc is a type or value spec's doc: its own comment, else the
+// declaration's when the declaration holds only this spec (the usual
+// "// Foo is ..." above "type Foo struct").
+func specDoc(own *ast.CommentGroup, d *ast.GenDecl) string {
+	if own != nil {
+		return synopsis(own)
+	}
+	if len(d.Specs) == 1 {
+		return synopsis(d.Doc)
+	}
+	return ""
+}

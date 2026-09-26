@@ -67,7 +67,7 @@ func Note(in NoteInput) (string, error) {
 	// The package map, when drawn, is the first diagram, so writeBaseline
 	// prints the key; otherwise it goes above the first delta diagram.
 	pkgMap := in.Baseline != nil && in.Baseline.Map != nil
-	delta := in.Filter.Dataflow != nil || len(in.Filter.CallPaths) > 0 || in.Filter.Wiring != nil
+	delta := len(in.Filter.Dataflows) > 0 || len(in.Filter.CallPaths) > 0 || in.Filter.Wiring != nil
 	key := ""
 	if pkgMap || delta {
 		key = Key(pkgMap, delta)
@@ -78,13 +78,34 @@ func Note(in NoteInput) (string, error) {
 	if delta && !pkgMap {
 		fmt.Fprintf(&b, "\n%s\n", key)
 	}
-	if in.Filter.Dataflow != nil {
-		b.WriteString("\n#### Dataflow\n\n")
-		fence(&b, Mermaid(in.Filter.Dataflow))
+	if dfs := in.Filter.Dataflows; len(dfs) > 0 {
+		// One diagram per entry point, each with the sentence that reads it:
+		// several entry points drawn into one diagram crossed their edges
+		// over a shared column of packages.
+		// The diagrams are read side by side, so they share one naming.
+		all := make([]*filter.Diagram, len(dfs))
+		for i := range dfs {
+			all[i] = &dfs[i]
+		}
+		names := shortNamesOf(all...)
+		b.WriteString("\n#### Dataflow\n")
+		for i := range dfs {
+			dg := dfs[i]
+			fmt.Fprintf(&b, "\n**%s**\n\n", mdEsc(dg.Title))
+			if s := dataflowBlurb(in, &dg, names); s != "" {
+				b.WriteString(s + "\n\n")
+			}
+			fence(&b, mermaidNamed(&dg, names))
+		}
 	}
 	if len(in.Filter.CallPaths) > 0 && len(in.Filter.CallPaths[0].Nodes) > 0 {
 		b.WriteString("\n#### Call paths\n\n")
 		primary := in.Filter.CallPaths[0]
+		// A split diagram is titled by its entry point; an unsplit one is
+		// titled "call paths", which the heading already says.
+		if len(in.Filter.CallPaths) > 1 && primary.Title != "call paths" {
+			fmt.Fprintf(&b, "**%s**\n\n", mdEsc(primary.Title))
+		}
 		if in.Filter.Fallback {
 			if in.FallbackText != "" {
 				b.WriteString(in.FallbackText + "\n")
@@ -94,16 +115,19 @@ func Note(in NoteInput) (string, error) {
 		} else {
 			fence(&b, Mermaid(&primary))
 		}
+		b.WriteString("\n" + CallPathBlurb(in, &primary) + "\n")
 		if rest := in.Filter.CallPaths[1:]; len(rest) > 0 {
 			fmt.Fprintf(&b, "\n<details><summary>%d more call-path %s</summary>\n\n", len(rest), plural(len(rest), "diagram", "diagrams"))
 			for i := range rest {
 				dg := rest[i]
-				fmt.Fprintf(&b, "**%s**\n\n", dg.Title)
+				fmt.Fprintf(&b, "**%s**\n\n", mdEsc(dg.Title))
 				fence(&b, Mermaid(&dg))
+				b.WriteString("\n" + CallPathBlurb(in, &dg) + "\n\n")
 			}
 			b.WriteString("</details>\n")
 		}
 	}
+	writeStacks(&b, in)
 	if in.Filter.Wiring != nil {
 		b.WriteString("\n#### Module wiring\n\n")
 		fence(&b, Mermaid(in.Filter.Wiring))
@@ -271,24 +295,38 @@ func writeNodeTable(b *strings.Builder, in NoteInput) {
 	if len(rows) == 0 {
 		return
 	}
-	b.WriteString("| node | status | package | link |\n|---|---|---|---|\n")
+	// The node is its own link: a separate link column spent a third of
+	// the width on file:line text and squeezed the names into a sliver.
+	b.WriteString("| node | status | package |\n|---|---|---|\n")
 	for _, n := range rows {
-		b.WriteString("| `" + mdEsc(Label(n)) + "` | " + n.Status + " | " + mdEsc(n.Package) + " | " + Permalink(in, n) + " |\n")
+		name := "`" + mdEsc(Label(n)) + "`"
+		if u := permalinkURL(in, n.Status, n.File, n.Line); u != "" {
+			name = "[" + name + "](" + u + ")"
+		}
+		b.WriteString("| " + name + " | " + strings.ReplaceAll(n.Status, "_", " ") + " | " + mdEsc(n.Package) + " |\n")
 	}
 }
 
 // Permalink returns a markdown link to the node's file at the head SHA (base
 // SHA for removed nodes), or "" when the project URL or file is unknown.
 func Permalink(in NoteInput, n filter.Node) string {
-	if in.ProjectURL == "" || n.File == "" {
+	url := permalinkURL(in, n.Status, n.File, n.Line)
+	if url == "" {
+		return ""
+	}
+	return fmt.Sprintf("[%s:%d](%s)", mdEsc(n.File), n.Line, url)
+}
+
+// permalinkURL is the URL Permalink links to.
+func permalinkURL(in NoteInput, status, file string, line int) string {
+	if in.ProjectURL == "" || file == "" {
 		return ""
 	}
 	sha := in.HeadSHA
-	if n.Status == filter.StatusRemoved {
+	if status == filter.StatusRemoved {
 		sha = in.BaseSHA
 	}
-	url := fmt.Sprintf("%s/-/blob/%s/%s#L%d", strings.TrimRight(in.ProjectURL, "/"), sha, n.File, n.Line)
-	return fmt.Sprintf("[%s:%d](%s)", mdEsc(n.File), n.Line, url)
+	return fmt.Sprintf("%s/-/blob/%s/%s#L%d", strings.TrimRight(in.ProjectURL, "/"), sha, file, line)
 }
 
 func writeLists(b *strings.Builder, in NoteInput) {

@@ -58,9 +58,12 @@ type Node struct {
 	Badges         []string
 	BodyChanged    bool
 	CollapsedCount int
-	File           string
-	Line           int
-	priority       int
+	// Members are the definitions a step-4d "pkg +N more" node stands for,
+	// so the note can still name and link them.
+	Members  []Node
+	File     string
+	Line     int
+	priority int
 }
 
 // Edge is one drawn edge.
@@ -95,8 +98,13 @@ type Result struct {
 	// CallPaths holds the call-path diagrams. The first is the primary; the
 	// rest go in a collapsed section (step 4e).
 	CallPaths []Diagram
-	// Dataflow is step 5, nil when no entrypoint changed.
-	Dataflow *Diagram
+	// Dataflows is step 5, one diagram per changed entrypoint; empty when
+	// none changed.
+	Dataflows []Diagram
+	// Stacks is section 10.3, one call stack per entry point that reaches
+	// changed code. StacksCut lists the entry points past the cap.
+	Stacks    []Stack
+	StacksCut []string
 	// Wiring is step 6, nil when packages and imports are unchanged.
 	Wiring *Diagram
 	// Fallback is set when the terminal rule could not fit a diagram under

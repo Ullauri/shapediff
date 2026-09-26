@@ -130,10 +130,17 @@ func TestNoteGolden(t *testing.T) {
 	d.Warnings = []string{"vta took 41s"}
 	d.Canonicalize()
 	res := &filter.Result{CallPaths: []filter.Diagram{*sample(), {Title: "GET /x", Nodes: []filter.Node{{ID: "sym:a.B", Label: "B", Kind: filter.KindSymbol, Status: filter.StatusAdded, Package: "a"}}, Subgraphs: []string{"pkg:a"}}},
-		Dataflow: &filter.Diagram{Nodes: []filter.Node{{ID: "entry:http:POST /orders", Label: "POST /orders", Kind: filter.KindEntrypoint, Status: filter.StatusContext}, {ID: "sink:db:orders", Label: "orders", Kind: filter.KindSink, Status: filter.StatusContext}},
-			Edges: []filter.Edge{{From: "entry:http:POST /orders", To: "sink:db:orders", Kind: "reaches", Status: filter.EdgeAdded}}},
+		Dataflows: []filter.Diagram{{Title: "POST /orders", Nodes: []filter.Node{{ID: "entry:http:POST /orders", Label: "POST /orders", Kind: filter.KindEntrypoint, Status: filter.StatusContext}, {ID: "sink:db:orders", Label: "orders", Kind: filter.KindSink, Status: filter.StatusContext}},
+			Edges: []filter.Edge{{From: "entry:http:POST /orders", To: "sink:db:orders", Kind: "reaches", Status: filter.EdgeAdded}}}},
 		Wiring: &filter.Diagram{Nodes: []filter.Node{{ID: "pkg:acme/svc/orders", Kind: filter.KindPackage, Package: "acme/svc/orders", Status: filter.StatusContext}, {ID: "pkg:acme/svc/util", Kind: filter.KindPackage, Package: "acme/svc/util", Status: filter.StatusAdded}},
 			Edges: []filter.Edge{{From: "pkg:acme/svc/orders", To: "pkg:acme/svc/util", Kind: "imports", Status: filter.EdgeAdded}}},
+		Stacks: []filter.Stack{{Entry: "entry:http:POST /orders", Label: "POST /orders", Status: filter.StatusContext, Changed: true, Lines: []filter.StackLine{
+			{Depth: 0, Last: true, ID: "sym:acme/svc/api.Handler.Create", Label: "Handler.Create", Kind: filter.KindSymbol, Status: filter.StatusContext, Via: "handles", ViaStatus: filter.EdgeUnchanged, Package: "acme/svc/api", File: "api/h.go", Line: 3},
+			{Depth: 1, ID: "sym:acme/svc/orders.(*Service).Create", Label: "(*Service).Create", Kind: filter.KindSymbol, Status: filter.StatusSignatureChanged, Via: "calls", ViaStatus: filter.EdgeUnchanged, Package: "acme/svc/orders",
+				Signature: "func (*Service) Create(ctx context.Context)", Before: "func (*Service) Create()", Doc: "Creates an order.", File: "orders/s.go", Line: 9},
+			{Depth: 2, Last: true, ID: "sink:db:orders", Label: "db orders", Kind: filter.KindSink, Status: filter.StatusContext, Via: "writes", ViaStatus: filter.EdgeAdded},
+			{Depth: 1, Last: true, ID: "more:sym:acme/svc/api.Handler.Create", Kind: filter.KindMore, Status: filter.StatusContext, More: []string{"log.Info", "metrics.Inc"}},
+		}}},
 		Omitted: filter.Omitted{HiddenNodes: 2, CollapsedSymbols: 3, BodyOnly: []string{"sym:acme/svc/orders.Service"}, WideReach: []filter.WideReach{{Entrypoint: "entry:http:POST /orders", Added: []string{"pkg:acme/svc/audit"}}}},
 	}
 	bl := &filter.Baseline{Packages: 3, External: 1, Entrypoints: 2, Sinks: 1,
@@ -169,7 +176,8 @@ func TestNoteGolden(t *testing.T) {
 		"| package | symbols | this MR | imported by | reached from | talks to |",
 		"| [`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders) | 12 | 1 added, 1 changed | `api`, `billing`, `cron`, `export`, +1 | `POST /orders` (new) | `db orders` |",
 		"| [`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util) | 3 | new package | `orders` | — | — |",
-		Key(true, true), "classDef touched", `(["2 http routes"])`, "```\n4 untouched packages folded into their directory to fit.\n", "#### Dataflow", "#### Call paths", "<details><summary>1 more call-path diagram", "**GET /x**", "#### Module wiring", "<details><summary>Details", "| node | status |", "[orders/v.go:7](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7)", "[util/o.go:1](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1)", "**Renames**", "`Old` → `Older` ?", "**Body-only changes**", "**Wide-reach changes**", "**Suppressed packages**", "2 nodes hidden by the budget", "**Warnings**", "vta took 41s", "extractor go-xtools 0.1.0 (typed, go1.26.0), base aaaaaaaa, head bbbbbbbb, 1.234s"}
+		Key(true, true), "classDef touched", `(["2 http routes"])`, "```\n4 untouched packages folded into their directory to fit.\n", "#### Dataflow", "**POST /orders**", "Existing endpoint whose reach changed, handled by [`Handler.Create`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/api/h.go#L3) in `svc/api`.", "> Creates an order. — `svc/orders.(*Service).Create`", "🟩 **Now also reaches**\n\n- the `orders` table: writes it in [`(*Service).Create`]", "#### Call paths", "What `POST /orders` calls, down to the changed code:\n\n- 🟩 **new** in `orders`: [`Validate`]", "- ⬜ the `orders` table", "<details><summary>1 more call-path diagram", "**GET /x**", "- 🟩 **new** in `a`: `B`",
+		"#### Call stacks", "**`POST /orders`**, reach changed", "<code>&nbsp;&nbsp;Handler.Create</code> svc/api", "<code>~&nbsp;├─&nbsp;(*Service).Create</code> svc/orders · signature changed", "```diff\n- func (*Service) Create()\n+ func (*Service) Create(ctx context.Context)\n```", "Creates an order.", "<code>+&nbsp;│&nbsp;&nbsp;└─&nbsp;writes&nbsp;db&nbsp;orders</code> new write", "<code>&nbsp;&nbsp;└─&nbsp;+2&nbsp;more</code>", "Also calls `log.Info` and `metrics.Inc`.", "#### Module wiring", "<details><summary>Details", "| node | status |", "| [`Validate`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7) | added | acme/svc/orders |", "| [`Old`](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1) | removed | acme/svc/util |", "**Renames**", "`Old` → `Older` ?", "**Body-only changes**", "**Wide-reach changes**", "**Suppressed packages**", "2 nodes hidden by the budget", "**Warnings**", "vta took 41s", "extractor go-xtools 0.1.0 (typed, go1.26.0), base aaaaaaaa, head bbbbbbbb, 1.234s"}
 	pos := 0
 	for _, o := range order {
 		i := strings.Index(got[pos:], o)
@@ -191,7 +199,7 @@ func TestNoteGolden(t *testing.T) {
 	if string(want) != got {
 		t.Errorf("note differs from golden; run with UPDATE_GOLDEN=1 to refresh\n%s", got)
 	}
-	if n := strings.Count(got, "**Key.**"); n != 1 {
+	if n := strings.Count(got, "**Key**\n"); n != 1 {
 		t.Errorf("want one key in the note, got %d", n)
 	}
 	// Without the package map the key moves down to the first delta diagram
@@ -216,15 +224,19 @@ func TestNoteGolden(t *testing.T) {
 }
 
 // The key names only what the note draws: purple and imports belong to the
-// package map, amber, `*` and the call arrows to the delta diagrams.
+// package map, amber, `*` and the call arrows to the delta diagrams. It is a
+// list, one line per concern, not a paragraph.
 func TestKey(t *testing.T) {
+	if k := Key(true, true); !strings.HasPrefix(k, "**Key**\n\n- ") || strings.Count(k, "\n- ") != 5 {
+		t.Errorf("key should be a five-line list:\n%s", k)
+	}
 	for _, c := range []struct {
 		pkgMap, delta bool
 		has, lacks    []string
 	}{
-		{true, true, []string{"purple", "amber", "an arrow is an import", "dynamic dispatch", "`*`"}, nil},
-		{false, true, []string{"amber", "dynamic dispatch", "`*`"}, []string{"purple", "import", "directory"}},
-		{true, false, []string{"purple", "an arrow is an import", "directory"}, []string{"amber", "dispatch", "`*`", "plain box"}},
+		{true, true, []string{"🟪 package this MR changes", "🟨 signature changed", "an arrow is an import", "dynamic dispatch", "`name*`", "**cylinder** data store"}, nil},
+		{false, true, []string{"🟨 signature changed", "dynamic dispatch", "`name*`"}, []string{"🟪", "import", "directory"}},
+		{true, false, []string{"🟪 package this MR changes", "an arrow is an import", "directory"}, []string{"🟨", "dispatch", "`name*`", "plain box"}},
 	} {
 		k := Key(c.pkgMap, c.delta)
 		for _, h := range c.has {

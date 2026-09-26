@@ -48,7 +48,8 @@ func Apply(d *delta.Delta, head, base *graph.Index, opts Options) *Result {
 		}
 		res.CallPaths = append(res.CallPaths, *p.diagram())
 	}
-	res.Dataflow = b.dataflow()
+	res.Dataflows = b.dataflows()
+	res.Stacks, res.StacksCut = b.stacks()
 	res.Wiring = b.wiring()
 	b.omitted(res)
 	return res

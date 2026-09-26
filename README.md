@@ -71,7 +71,8 @@ project. Both files document their variables.
 | 8.3 weekly delta and attribution | `internal/weekly` | joins cached per-MR deltas; MR list from the merge requests API |
 | 9 filtering | `internal/filter` | steps 1 to 6 as written, every tie by ID |
 | 10 rendering | `internal/render` | Mermaid, note assembly, graphviz dot fallback |
-| 10.1 baseline view | `internal/filter` `BaselineView`, `internal/render` `writeBaseline` | the package map and touched-package table; the kept reach on the dataflow diagram is in `internal/filter` `dataflow` |
+| 10.1 baseline view | `internal/filter` `BaselineView`, `internal/render` `writeBaseline` | the package map and touched-package table; the kept reach on the dataflow diagram is in `internal/filter` `dataflows` |
+| 10.3 call stacks | `internal/filter` `stacks`, `internal/render` `writeStacks` | the tree over head ∪ base; the prose beside each diagram is `internal/render` `prose.go` |
 | 10 weekly pinned layout | `internal/weekly` `Layout` | `pin=true`, `notranslate`, reset policy |
 | 11 narration | `internal/narrate` | template, claim validator, optional OpenAI-compatible rewrite |
 | 13 configuration | `internal/config` | defaults, `config_hash` |

@@ -14,7 +14,13 @@ At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external 
 | [`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders) | 12 | 1 added, 1 changed | `api`, `billing`, `cron`, `export`, +1 | `POST /orders` (new) | `db orders` |
 | [`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util) | 3 | new package | `orders` | — | — |
 
-**Key.** A rounded box is an entry point, a double-bordered box a package, a cylinder a data store, a plain box a function or definition. Green is added, red dashed removed, amber a changed signature, purple a package this MR changes code in, grey unchanged context drawn for orientation. Arrows take the same colours; a dotted arrow is an inferred call, a dashed one dynamic dispatch. In the package map an arrow is an import and an outer box a directory. `*` marks a definition whose body also changed, and `name +N more` is a group of N definitions drawn as one box.
+**Key**
+
+- 🟩 added · 🟥 removed (dashed) · 🟨 signature changed · 🟪 package this MR changes · ⬜ unchanged, drawn for context
+- **rounded** entry point · **double border** package · **cylinder** data store · **plain box** function or type
+- Arrows take their colour the same way: `──▶` call · `┈┈▶` inferred call · `╌╌▶` dynamic dispatch
+- In the package map an arrow is an import and an outer box a directory
+- `name*` body also changed · `+N more` N definitions drawn as one box
 
 ```mermaid
 flowchart LR
@@ -38,6 +44,16 @@ flowchart LR
 4 untouched packages folded into their directory to fit.
 
 #### Dataflow
+
+**POST /orders**
+
+Existing endpoint whose reach changed, handled by [`Handler.Create`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/api/h.go#L3) in `svc/api`.
+
+> Creates an order. — `svc/orders.(*Service).Create`
+
+🟩 **Now also reaches**
+
+- the `orders` table: writes it in [`(*Service).Create`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/s.go#L9)
 
 ```mermaid
 flowchart LR
@@ -81,6 +97,14 @@ flowchart LR
   class na3c6eddb signature_changed
 ```
 
+What `POST /orders` calls, down to the changed code:
+
+- 🟩 **new** in `orders`: [`Validate`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7)
+- 🟥 **removed** in `util`: [`Old`](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1)
+- 🟨 **signature changed** in `orders`: [`(*Service).Create`*](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/s.go#L12)
+- ⬜ **unchanged** in `orders`: [`Handler`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/h.go#L3)
+- ⬜ the `orders` table
+
 <details><summary>1 more call-path diagram</summary>
 
 **GET /x**
@@ -93,6 +117,45 @@ flowchart LR
   end
   class na90b54ed added
 ```
+
+Changed code that no entry point reaches narrowly, with what calls it and what it calls:
+
+- 🟩 **new** in `a`: `B`
+
+</details>
+
+#### Call stacks
+
+What runs when each entry point this MR touches is called: its handler, every call on the way to changed code, and the other calls made along the way, as context. `+` is added, `-` removed, `~` a changed signature; an unmarked line is unchanged. Open a line for its signature, what it does and where it is.
+
+**`POST /orders`**, reach changed
+
+<details><summary><code>&nbsp;&nbsp;Handler.Create</code> svc/api</summary>
+
+[api/h.go:3](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/api/h.go#L3)
+
+</details>
+<details><summary><code>~&nbsp;├─&nbsp;(*Service).Create</code> svc/orders · signature changed</summary>
+
+```diff
+- func (*Service) Create()
++ func (*Service) Create(ctx context.Context)
+```
+
+Creates an order.
+
+[orders/s.go:9](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/s.go#L9)
+
+</details>
+<details><summary><code>+&nbsp;│&nbsp;&nbsp;└─&nbsp;writes&nbsp;db&nbsp;orders</code> new write</summary>
+
+Writes the `orders` table.
+
+</details>
+<details><summary><code>&nbsp;&nbsp;└─&nbsp;+2&nbsp;more</code></summary>
+
+Also calls `log.Info` and `metrics.Inc`. None of them leads to changed code.
+
 </details>
 
 #### Module wiring
@@ -111,15 +174,15 @@ flowchart LR
 
 <details><summary>Details</summary>
 
-| node | status | package | link |
-|---|---|---|---|
-| `POST /orders` | context |  |  |
-| `orders` | context |  |  |
-| `B` | added | a |  |
-| `(*Service).Create* (+3 callers)` | signature_changed | acme/svc/orders | [orders/s.go:12](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/s.go#L12) |
-| `Handler` | context | acme/svc/orders | [orders/h.go:3](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/h.go#L3) |
-| `Validate` | added | acme/svc/orders | [orders/v.go:7](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7) |
-| `Old` | removed | acme/svc/util | [util/o.go:1](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1) |
+| node | status | package |
+|---|---|---|
+| `POST /orders` | context |  |
+| `orders` | context |  |
+| `B` | added | a |
+| [`(*Service).Create* (+3 callers)`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/s.go#L12) | signature changed | acme/svc/orders |
+| [`Handler`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/h.go#L3) | context | acme/svc/orders |
+| [`Validate`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7) | added | acme/svc/orders |
+| [`Old`](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1) | removed | acme/svc/util |
 
 **Renames**
 

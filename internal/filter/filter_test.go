@@ -41,7 +41,7 @@ func TestFocusAndContext(t *testing.T) {
 	if !reflect.DeepEqual(dg.Subgraphs, []string{"pkg:acme/svc/orders", "pkg:acme/svc/store"}) {
 		t.Errorf("subgraphs = %v", dg.Subgraphs)
 	}
-	if res.Dataflow != nil || res.Wiring != nil || res.Fallback {
+	if len(res.Dataflows) != 0 || res.Wiring != nil || res.Fallback {
 		t.Error("no dataflow/wiring expected")
 	}
 }
@@ -419,7 +419,7 @@ func TestBodyChangedBadgeOnRoute(t *testing.T) {
 	// the added reach is drawn green; what the entry point kept reaching
 	// (store and its table) is drawn grey beside it (spec 10.1)
 	var added, kept []string
-	for _, e := range res.Dataflow.Edges {
+	for _, e := range res.Dataflows[0].Edges {
 		switch e.Status {
 		case EdgeAdded:
 			added = append(added, e.To)
@@ -428,12 +428,12 @@ func TestBodyChangedBadgeOnRoute(t *testing.T) {
 		}
 	}
 	if !reflect.DeepEqual(added, []string{"pkg:acme/svc/orders"}) || !reflect.DeepEqual(kept, []string{"pkg:acme/svc/store", "sink:db:store"}) {
-		t.Errorf("dataflow = %+v", res.Dataflow)
+		t.Errorf("dataflow = %+v", res.Dataflows)
 	}
 	// over budget, the kept reach goes first and the delta stays
 	res = Apply(d, s.head, s.base, Options{Budget: Budget{Chars: 1, Nodes: 2, Edges: 1, NarrowTargets: 2}})
-	if res.Dataflow == nil || len(res.Dataflow.Edges) != 1 || res.Dataflow.Edges[0].Status != EdgeAdded || len(res.Dataflow.Nodes) != 2 {
-		t.Errorf("dataflow over budget = %+v", res.Dataflow)
+	if len(res.Dataflows) != 1 || len(res.Dataflows[0].Edges) != 1 || res.Dataflows[0].Edges[0].Status != EdgeAdded || len(res.Dataflows[0].Nodes) != 2 {
+		t.Errorf("dataflow over budget = %+v", res.Dataflows)
 	}
 }
 
@@ -702,5 +702,126 @@ func TestPrunedGroupIsNotDoubleCounted(t *testing.T) {
 	res := Apply(d, head, head, Options{Budget: Budget{Chars: 0, Nodes: 2, Edges: 100, NarrowTargets: 2}})
 	if got := len(res.Omitted.Orphans) + res.Omitted.CollapsedSymbols; got != 3 {
 		t.Errorf("3 definitions reported as %d (orphans %d, collapsed %d)", got, len(res.Omitted.Orphans), res.Omitted.CollapsedSymbols)
+	}
+}
+
+// TestStacks is section 10.3: an unchanged entry point whose handler calls
+// changed code gets a stack; the path to the change is expanded and a call
+// that leads nowhere changed is a leaf with its own calls counted.
+func TestStacks(t *testing.T) {
+	s := basicScenario()
+	s.d.Entrypoints = []delta.Entrypoint{{ID: s.entry, Status: "unchanged"}}
+	res := Apply(s.d, s.head, s.base, Options{Budget: defaultBudget()})
+	if len(res.Stacks) != 1 || len(res.StacksCut) != 0 {
+		t.Fatalf("stacks = %+v, cut %v", res.Stacks, res.StacksCut)
+	}
+	st := res.Stacks[0]
+	if st.Entry != s.entry || st.Changed || st.Status != StatusContext {
+		t.Errorf("stack head = %+v", st)
+	}
+	type row struct {
+		depth      int
+		last       bool
+		id, status string
+		via        string
+		hidden     int
+	}
+	var got []row
+	for _, ln := range st.Lines {
+		got = append(got, row{ln.Depth, ln.Last, ln.ID, ln.Status, ln.ViaStatus, ln.Hidden})
+	}
+	want := []row{
+		{0, true, s.handler, StatusContext, EdgeUnchanged, 0},
+		{1, true, s.create, StatusContext, EdgeUnchanged, 0},
+		{2, false, s.validate, StatusAdded, EdgeAdded, 0},
+		{2, true, s.insert, StatusContext, EdgeUnchanged, 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("lines =\n%+v\nwant\n%+v", got, want)
+	}
+	// under an added definition, the calls it makes are not marked new:
+	// the definition's own marker says that, and the callee is old code
+	s2 := basicScenario()
+	s2.d.Entrypoints = []delta.Entrypoint{{ID: s2.entry, Status: "unchanged"}}
+	s2.d.Nodes.Added = []string{s2.create}
+	s2.d.Edges.Added = nil
+	s2.d.Canonicalize()
+	res2 := Apply(s2.d, s2.head, s2.base, Options{Budget: defaultBudget()})
+	if len(res2.Stacks) != 1 {
+		t.Fatalf("stacks = %+v", res2.Stacks)
+	}
+	// Create -> Validate exists only at head, so without the rule it would
+	// read as a new call
+	found := false
+	for _, ln := range res2.Stacks[0].Lines {
+		if ln.ID == s2.validate {
+			found = true
+			if ln.Status != StatusContext || ln.ViaStatus != EdgeUnchanged {
+				t.Errorf("callee of an added definition marked: %+v", ln)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("Validate not listed under Create: %+v", res2.Stacks[0].Lines)
+	}
+	// an entry point that reaches no changed code gets no stack
+	d := *s.d
+	d.Nodes.Added = nil
+	d.Edges.Added = nil
+	if res := Apply(&d, s.head, s.base, Options{Budget: defaultBudget()}); len(res.Stacks) != 0 {
+		t.Errorf("stack without a change: %+v", res.Stacks)
+	}
+}
+
+// TestDataflowsOnePerEntry: step 5 draws each changed entry point alone.
+func TestDataflowsOnePerEntry(t *testing.T) {
+	s := basicScenario()
+	s.d.Entrypoints = []delta.Entrypoint{
+		{ID: s.entry, Status: "reach_changed", ReachAdded: []string{"pkg:acme/svc/orders"}},
+		{ID: "entry:http:GET /other", Status: "added"},
+	}
+	s.d.Canonicalize()
+	res := Apply(s.d, s.head, s.base, Options{Budget: defaultBudget()})
+	if len(res.Dataflows) != 2 {
+		t.Fatalf("dataflows = %+v", res.Dataflows)
+	}
+	for _, dg := range res.Dataflows {
+		eps := 0
+		for _, n := range dg.Nodes {
+			if n.Kind == KindEntrypoint {
+				eps++
+				if n.Label != dg.Title {
+					t.Errorf("diagram %q draws %q", dg.Title, n.Label)
+				}
+			}
+		}
+		if eps != 1 {
+			t.Errorf("diagram %q has %d entry points", dg.Title, eps)
+		}
+	}
+}
+
+// TestSplitTitles: step 4e gives an unchanged entry point drawn in the
+// diagram its own part instead of leaving it in the remainder titled "not
+// reachable from any entrypoint", and puts changed entry points first.
+func TestSplitTitles(t *testing.T) {
+	s := basicScenario()
+	s.d.Entrypoints = []delta.Entrypoint{{ID: "entry:http:POST /z", Status: "added"}, {ID: s.entry, Status: "unchanged"}}
+	b := newBuilder(s.d, s.head, s.base, Options{Budget: defaultBudget()})
+	w := b.newWork("call paths")
+	w.nodes[s.entry] = &Node{ID: s.entry, Kind: KindEntrypoint}
+	w.nodes[s.handler] = &Node{ID: s.handler, Kind: KindSymbol}
+	w.nodes["entry:http:POST /z"] = &Node{ID: "entry:http:POST /z", Kind: KindEntrypoint}
+	w.nodes[s.validate] = &Node{ID: s.validate, Kind: KindSymbol}
+	w.nodes[s.insert] = &Node{ID: s.insert, Kind: KindSymbol}
+	w.edges[edgeKey{s.entry, s.handler, "handles"}] = &Edge{From: s.entry, To: s.handler, Kind: "handles"}
+	w.edges[edgeKey{"entry:http:POST /z", s.validate, "handles"}] = &Edge{From: "entry:http:POST /z", To: s.validate, Kind: "handles"}
+	var titles []string
+	for _, p := range b.split(w) {
+		titles = append(titles, p.title)
+	}
+	want := []string{"POST /z", "POST /orders", "not reachable from any entrypoint"}
+	if !reflect.DeepEqual(titles, want) {
+		t.Errorf("titles = %q, want %q", titles, want)
 	}
 }

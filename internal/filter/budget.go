@@ -166,19 +166,34 @@ func (w *work) stepD() bool {
 	// Name the group after its package: "17 symbols" costs the same space as
 	// "..." and says as much.
 	gn.Label = fmt.Sprintf("%s +%d more", graph.ShortName(graph.PkgID(first.Package)), gn.CollapsedCount)
+	gn.Members = append([]Node(nil), w.b.collapsedInto[gid]...)
 	return true
 }
 
-// split is step 4e: one diagram per changed entrypoint drawn in w, plus one
-// for nodes reachable from none. Returns w alone when it would not split.
+// split is step 4e: one diagram per entrypoint drawn in w, changed ones
+// first, plus one for nodes reachable from none. An unchanged entry point
+// is drawn when it calls a changed signature, and it used to fall into the
+// remainder, which was then titled "not reachable from any entrypoint"
+// while drawing one. Returns w alone when it would not split.
 func (b *builder) split(w *work) []*work {
-	var eps []string
+	changed := map[string]bool{}
 	for _, ep := range b.d.Entrypoints {
-		if ep.Status != "unchanged" && w.nodes[ep.ID] != nil {
-			eps = append(eps, ep.ID)
+		if ep.Status != "unchanged" {
+			changed[ep.ID] = true
 		}
 	}
-	sort.Strings(eps)
+	var eps []string
+	for id, n := range w.nodes {
+		if n.Kind == KindEntrypoint {
+			eps = append(eps, id)
+		}
+	}
+	sort.Slice(eps, func(i, j int) bool {
+		if changed[eps[i]] != changed[eps[j]] {
+			return changed[eps[i]]
+		}
+		return eps[i] < eps[j]
+	})
 	if len(eps) == 0 {
 		return []*work{w}
 	}
@@ -294,24 +309,23 @@ func (b *builder) commit(w, t *work) {
 
 // ---- steps 5 and 6 ----
 
-// dataflow is step 5: one row per changed entrypoint, reach_added and
-// reach_removed at package-and-sink granularity. Spec 10.1 adds the
-// baseline on top: what the entry point reached before and still reaches
-// is drawn in grey (up to maxKeptReach items, sinks first, the rest as a
-// badge), so an added sink reads as "now also queue" and an added entry
-// point shows where it goes. The kept reach is dropped again, entry point
-// by entry point, if it puts the diagram over budget: the change is the
-// subject and the baseline is the context.
-func (b *builder) dataflow() *Diagram {
-	w := b.newWork("dataflow")
-	any := false
-	var eps []string
+// dataflows is step 5: one diagram per changed entrypoint, its
+// reach_added and reach_removed at package-and-sink granularity. One
+// diagram each, not one for all of them: every entry point pointing at a
+// shared column of packages drew edges that crossed, and a reader could not
+// tell which reach belonged to which route. Spec 10.1 adds the baseline on
+// top: what the entry point reached before and still reaches is drawn in
+// grey (up to maxKeptReach items, sinks first, the rest as a badge), so an
+// added sink reads as "now also queue" and an added entry point shows where
+// it goes. The kept reach is dropped again if it puts the diagram over
+// budget: the change is the subject and the baseline is the context.
+func (b *builder) dataflows() []Diagram {
+	var out []Diagram
 	for _, ep := range b.d.Entrypoints {
 		if ep.Status == "unchanged" {
 			continue
 		}
-		any = true
-		eps = append(eps, ep.ID)
+		w := b.newWork(graph.ShortName(ep.ID))
 		en := w.addGraphNode(ep.ID)
 		en.Kind = KindEntrypoint
 		switch ep.Status {
@@ -330,35 +344,18 @@ func (b *builder) dataflow() *Diagram {
 			b.reachNode(w, item)
 			w.edges[edgeKey{ep.ID, item, "reaches"}] = &Edge{From: ep.ID, To: item, Kind: "reaches", Status: EdgeRemoved}
 		}
-	}
-	if !any {
-		return nil
-	}
-	kept := map[string][]string{}
-	for _, ep := range b.d.Entrypoints {
-		if ep.Status != "unchanged" {
-			kept[ep.ID] = b.keptReach(ep)
-			b.drawKept(w, ep.ID, kept[ep.ID])
+		kept := b.keptReach(ep)
+		b.drawKept(w, ep.ID, kept)
+		// Over budget: take the baseline back out; the delta itself is
+		// never cut here.
+		if b.over(w, b.opts.Budget.Nodes) {
+			b.undrawKept(w, ep.ID, kept)
 		}
+		dg := w.diagram()
+		dg.Subgraphs = []string{} // package-level view: no boxes
+		out = append(out, *dg)
 	}
-	// Over budget: take the baseline back out, most items first, until it
-	// fits; the delta itself is never cut here.
-	for b.over(w, b.opts.Budget.Nodes) {
-		worst, n := "", 0
-		for _, id := range eps {
-			if len(kept[id]) > n {
-				worst, n = id, len(kept[id])
-			}
-		}
-		if n == 0 {
-			break
-		}
-		b.undrawKept(w, worst, kept[worst])
-		kept[worst] = nil
-	}
-	dg := w.diagram()
-	dg.Subgraphs = []string{} // package-level view: no boxes
-	return dg
+	return out
 }
 
 // maxKeptReach caps the unchanged reach drawn per entry point.

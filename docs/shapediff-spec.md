@@ -767,7 +767,10 @@ notes and it needs no image hosting.
 
 - Node styling by status: added green fill, removed red dashed border,
   signature-changed amber fill, context grey. Dynamic edges dashed.
-  Inferred edges dotted. Legend line under the diagram.
+  Inferred edges dotted. One key per note, above its first diagram (the
+  package map of 10.1 when it is drawn); it names the shapes as well as the
+  colours, and writes a clause only when the note draws a diagram it
+  describes.
 - A node that is drawn because it lies on a `changed_paths` route and is
   also `body_changed` carries a `*` suffix on its label, meaning "body also
   changed here". It is a badge, not a colour; amber is taken.
@@ -852,7 +855,8 @@ changed symbols plus the "+N packages" node (`B` plus one, as step 4f's
 "+N more" is), lowering `B` while the source is still over `S`. Step f
 always terminates; if the source is over `S` even at the floor, the table
 stands and the map is omitted with one line saying so. What was folded or
-hidden is said under the legend, each package counted once. The
+hidden is said in a caption under the map, each package counted once. The
+map has no legend of its own: the note's one key (section 10) covers it. The
 reasoning for the order: a package as a node with no edges is still a
 place on the map; an edge between two untouched packages is the first
 thing a reader placing a change can do without.
@@ -1575,3 +1579,16 @@ What was *not* done, deliberately: a note that explains the code or teaches
 the reader something the delta does not contain. Section 3 rules that out and
 section 11's validators enforce it, and that boundary is what keeps the note
 something a reviewer can trust without checking.
+
+### Added after v0.5 (owner's request, 2026-09-25)
+
+- **The baseline map's legend is folded into the note's one key** (sections
+  10 and 10.1). With both branches merged, the map's own legend line sat
+  directly above the key, two keys in a row that disagreed on grey
+  ("untouched" against "unchanged context") and on what a box is: the chrome
+  v0.4.1 removed, back again. The key is now printed above the first diagram,
+  which is the map when it is drawn, and adds purple, "an arrow is an import"
+  and "an outer box a directory" only when the map is drawn, and amber, `*`
+  and the call arrows only when a delta diagram is. What the map folded or
+  hid to fit stays under the map as a caption, since it is about that
+  diagram and not a key to it.

@@ -135,7 +135,11 @@ project. Both files document their variables.
   nodes they kept. A diagram left with no edges is not drawn at all.
 - **One key per note (section 10).** The legend is printed once, above the
   first diagram, not under each; it names the node shapes as well as the
-  colours. Removed edges are dashed as well as red.
+  colours. Removed edges are dashed as well as red. The baseline map has no
+  legend of its own: the key covers it, and says only what the note draws
+  (purple and imports when the map is drawn; amber, `*` and the call arrows
+  when a delta diagram is). What the map folded or hid to fit is a caption
+  under the map.
 - **Colliding package labels are widened (section 10).** Each package drawn
   in a diagram takes the shortest trailing path unique within that diagram,
   so two packages called `pipelines` are not two boxes with one name. The

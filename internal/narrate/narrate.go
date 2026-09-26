@@ -12,8 +12,12 @@ import (
 	"github.com/Ullauri/shapediff/internal/graph"
 )
 
-// MaxSentences is the cap on narration length.
+// MaxSentences is the cap on what the LLM rewrite is offered and may
+// return. The template itself writes at most one sentence per fact class.
 const MaxSentences = 8
+
+// MaxItems is how many names a list item nests before "and N more".
+const MaxItems = 8
 
 // Predicates a claim may assert. Each maps to one fact class in the delta.
 const (
@@ -48,24 +52,45 @@ type Sentence struct {
 	Claims []Claim
 	// Rewritten is true when the LLM rewrite replaced the template text.
 	Rewritten bool
+	// Lead and Items are the sentence as the note prints it: a bold count
+	// with the names under it, one per line, since a sentence that lists
+	// five names has to be read across to find the third. Text is the same
+	// facts as prose, for the rewrite and the claim validator. A template
+	// sentence with no Lead is not printed: what it says is on the page
+	// already (the suppression line, or an added endpoint's reach, which is
+	// nested under the endpoint).
+	Lead  string
+	Items []string
 }
 
-// Headline renders the one-line summary of section 14.1.
-func Headline(d *delta.Delta) string {
+// Unchanged says which of section 14.1's four standing counts are zero:
+// endpoints added, endpoints' reach changed, signatures changed, packages
+// added. A count that is not zero is a list item of its own; a zero is
+// still news to a reviewer ("no endpoint's reach changed"), so it is one
+// line under the list rather than left out. "" when none is zero.
+func Unchanged(d *delta.Delta) string {
 	s := d.Stats
-	parts := []string{
-		fmt.Sprintf("%d %s added", s.EntrypointsAdded, plural(s.EntrypointsAdded, "endpoint", "endpoints")),
-		fmt.Sprintf("%d %s reach changed", s.EntrypointsReachChanged, possessive(s.EntrypointsReachChanged, "endpoint")),
-		fmt.Sprintf("%d %s changed (%d %s)", s.SignaturesChanged, plural(s.SignaturesChanged, "signature", "signatures"), s.SignatureCallers, plural(s.SignatureCallers, "caller", "callers")),
-		fmt.Sprintf("%d %s added", s.PackagesAdded, plural(s.PackagesAdded, "package", "packages")),
+	var parts []string
+	if s.EntrypointsAdded == 0 {
+		parts = append(parts, "no endpoint was added")
 	}
-	if s.EntrypointsRemoved > 0 {
-		parts = append(parts, fmt.Sprintf("%d %s removed", s.EntrypointsRemoved, plural(s.EntrypointsRemoved, "endpoint", "endpoints")))
+	if s.EntrypointsReachChanged == 0 {
+		parts = append(parts, "no endpoint's reach changed")
 	}
-	if s.PackagesRemoved > 0 {
-		parts = append(parts, fmt.Sprintf("%d %s removed", s.PackagesRemoved, plural(s.PackagesRemoved, "package", "packages")))
+	if s.SignaturesChanged == 0 {
+		parts = append(parts, "no signature changed")
 	}
-	return strings.Join(parts, ", ") + "."
+	if s.PackagesAdded == 0 {
+		parts = append(parts, "no package was added")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	out := parts[0]
+	if len(parts) > 1 {
+		out = strings.Join(parts[:len(parts)-1], ", ") + " and " + parts[len(parts)-1]
+	}
+	return strings.ToUpper(out[:1]) + out[1:] + "."
 }
 
 // SuppressionLine renders section 8.4's headline addendum, or "" when no
@@ -84,11 +109,13 @@ func SuppressionLine(d *delta.Delta) string {
 
 // Template renders the narration from the delta alone, in the section 11
 // order: entrypoint reach changes; signature changes and their caller
-// counts; renames; module wiring; body-only count; suppressed packages.
+// counts; renames; definitions added and removed; module wiring; body-only
+// changes; suppressed packages. One sentence per fact class, so it is
+// bounded by the number of classes and needs no cap of its own.
 func Template(d *delta.Delta, head, base *graph.Index) []Sentence {
 	var out []Sentence
 	add := func(s Sentence) {
-		if s.Text != "" && len(out) < MaxSentences {
+		if s.Text != "" {
 			out = append(out, s)
 		}
 	}
@@ -97,9 +124,11 @@ func Template(d *delta.Delta, head, base *graph.Index) []Sentence {
 	add(reachChanged(d))
 	add(signatures(d, head))
 	add(renames(d))
+	add(definitions(d, head, "added"))
+	add(definitions(d, base, "removed"))
 	add(packages(d))
 	add(imports(d))
-	add(bodyOnly(d))
+	add(bodyOnly(d, head))
 	add(suppressed(d))
 	return out
 }
@@ -118,6 +147,19 @@ func entrypointsAdded(d *delta.Delta) Sentence {
 	for _, id := range ids {
 		s.Claims = append(s.Claims, Claim{SubjectID: id, Predicate: PredAdded, Sentence: s.Text})
 	}
+	s.Lead = fmt.Sprintf("**%d %s added**", len(ids), plural(len(ids), "endpoint", "endpoints"))
+	reach := map[string][]string{}
+	for _, ep := range d.Entrypoints {
+		if ep.Status == delta.EPAdded {
+			reach[ep.ID] = ep.ReachAdded
+		}
+	}
+	s.Items = items(ids, func(id string) string {
+		if r := reach[id]; len(r) > 0 {
+			return name(id) + ", which reaches " + listNames(r, 4)
+		}
+		return name(id)
+	})
 	return s
 }
 
@@ -135,6 +177,8 @@ func entrypointsRemoved(d *delta.Delta) Sentence {
 	for _, id := range ids {
 		s.Claims = append(s.Claims, Claim{SubjectID: id, Predicate: PredRemoved, Sentence: s.Text})
 	}
+	s.Lead = fmt.Sprintf("**%d %s removed**", len(ids), plural(len(ids), "endpoint", "endpoints"))
+	s.Items = items(ids, name)
 	return s
 }
 
@@ -144,6 +188,17 @@ func reachChanged(d *delta.Delta) Sentence {
 	for _, ep := range d.Entrypoints {
 		if ep.Status != delta.EPReachChanged && !(ep.Status == delta.EPAdded && len(ep.ReachAdded) > 0) {
 			continue
+		}
+		// An added endpoint's reach is nested under it in the added list.
+		if ep.Status == delta.EPReachChanged {
+			var what []string
+			if len(ep.ReachAdded) > 0 {
+				what = append(what, "now also reaches "+listNames(ep.ReachAdded, 4))
+			}
+			if len(ep.ReachRemoved) > 0 {
+				what = append(what, "no longer reaches "+listNames(ep.ReachRemoved, 4))
+			}
+			s.Items = append(s.Items, name(ep.ID)+" "+strings.Join(what, "; "))
 		}
 		if len(ep.ReachAdded) > 0 {
 			parts = append(parts, fmt.Sprintf("%s now reaches %s", name(ep.ID), listNames(ep.ReachAdded, 3)))
@@ -165,6 +220,12 @@ func reachChanged(d *delta.Delta) Sentence {
 	for i := range s.Claims {
 		s.Claims[i].Sentence = s.Text
 	}
+	if n := len(s.Items); n > 0 {
+		s.Lead = fmt.Sprintf("**%d %s reach changed**", n, possessive(n, "endpoint"))
+		if n > MaxItems {
+			s.Items = append(s.Items[:MaxItems], fmt.Sprintf("and %d more", n-MaxItems))
+		}
+	}
 	return s
 }
 
@@ -174,6 +235,12 @@ func signatures(d *delta.Delta, head *graph.Index) Sentence {
 	}
 	var s Sentence
 	var parts []string
+	total := 0
+	var ids []string
+	for _, sc := range d.Nodes.SignatureChanged {
+		ids = append(ids, sc.ID)
+	}
+	where := wherer(ids, head)
 	for _, sc := range d.Nodes.SignatureChanged {
 		callers := 0
 		if head != nil {
@@ -181,10 +248,21 @@ func signatures(d *delta.Delta, head *graph.Index) Sentence {
 		}
 		parts = append(parts, fmt.Sprintf("%s changed signature (%d %s)", name(sc.ID), callers, plural(callers, "caller", "callers")))
 		s.Claims = append(s.Claims, Claim{SubjectID: sc.ID, Predicate: PredSignatureChanged})
+		who := "no callers"
+		if callers > 0 {
+			who = fmt.Sprintf("%d %s", callers, plural(callers, "caller", "callers"))
+		}
+		s.Items = append(s.Items, where(sc.ID)+", "+who)
+		total += callers
 	}
 	s.Text = strings.Join(parts, "; ") + "."
 	for i := range s.Claims {
 		s.Claims[i].Sentence = s.Text
+	}
+	n := len(d.Nodes.SignatureChanged)
+	s.Lead = fmt.Sprintf("**%d %s changed**, %d %s in all", n, plural(n, "signature", "signatures"), total, plural(total, "caller", "callers"))
+	if len(s.Items) > MaxItems {
+		s.Items = append(s.Items[:MaxItems], fmt.Sprintf("and %d more", len(s.Items)-MaxItems))
 	}
 	return s
 }
@@ -196,22 +274,30 @@ func renames(d *delta.Delta) Sentence {
 	var s Sentence
 	var parts []string
 	for i, r := range d.Nodes.Renamed {
+		q := ""
+		if r.Confidence == "medium" {
+			q = " (probably)"
+		}
 		if i < 3 {
-			q := ""
-			if r.Confidence == "medium" {
-				q = " (probably)"
-			}
 			parts = append(parts, fmt.Sprintf("%s renamed to %s%s", name(r.From), name(r.To), q))
+		}
+		if i < MaxItems {
+			s.Items = append(s.Items, fmt.Sprintf("%s → %s%s", name(r.From), name(r.To), q))
 		}
 		s.Claims = append(s.Claims, Claim{SubjectID: r.From, Predicate: PredRenamedTo, ObjectID: r.To})
 	}
 	if n := len(d.Nodes.Renamed) - 3; n > 0 {
 		parts = append(parts, fmt.Sprintf("and %d more %s", n, plural(n, "rename", "renames")))
 	}
+	if n := len(d.Nodes.Renamed) - MaxItems; n > 0 {
+		s.Items = append(s.Items, fmt.Sprintf("and %d more", n))
+	}
 	s.Text = strings.Join(parts, "; ") + "."
 	for i := range s.Claims {
 		s.Claims[i].Sentence = s.Text
 	}
+	n := len(d.Nodes.Renamed)
+	s.Lead = fmt.Sprintf("**%d %s renamed**", n, plural(n, "definition", "definitions"))
 	return s
 }
 
@@ -222,6 +308,16 @@ func packages(d *delta.Delta) Sentence {
 	}
 	var s Sentence
 	var parts []string
+	var lead []string
+	if len(p.Added) > 0 {
+		lead = append(lead, fmt.Sprintf("%d %s added", len(p.Added), plural(len(p.Added), "package", "packages")))
+		s.Items = append(s.Items, items(p.Added, func(id string) string { return name(id) + " (new)" })...)
+	}
+	if len(p.Removed) > 0 {
+		lead = append(lead, fmt.Sprintf("%d %s removed", len(p.Removed), plural(len(p.Removed), "package", "packages")))
+		s.Items = append(s.Items, items(p.Removed, func(id string) string { return name(id) + " (removed)" })...)
+	}
+	s.Lead = "**" + strings.Join(lead, ", ") + "**"
 	if len(p.Added) > 0 {
 		parts = append(parts, fmt.Sprintf("package %s %s added", listNames(p.Added, 3), isAre(len(p.Added))))
 		for _, id := range p.Added {
@@ -252,16 +348,23 @@ func imports(d *delta.Delta) Sentence {
 		if i < 3 {
 			parts = append(parts, fmt.Sprintf("%s now imports %s", name(e.From), name(e.To)))
 		}
+		s.Items = append(s.Items, fmt.Sprintf("%s now imports %s", name(e.From), name(e.To)))
 		s.Claims = append(s.Claims, Claim{SubjectID: e.From, Predicate: PredImports, ObjectID: e.To})
 	}
 	for i, e := range p.ImportsRemoved {
 		if i < 3 {
 			parts = append(parts, fmt.Sprintf("%s no longer imports %s", name(e.From), name(e.To)))
 		}
+		s.Items = append(s.Items, fmt.Sprintf("%s no longer imports %s", name(e.From), name(e.To)))
 		s.Claims = append(s.Claims, Claim{SubjectID: e.From, Predicate: PredNoLongerImports, ObjectID: e.To})
 	}
 	if n := len(p.ImportsAdded) + len(p.ImportsRemoved) - len(parts); n > 0 {
 		parts = append(parts, fmt.Sprintf("and %d more import %s", n, plural(n, "change", "changes")))
+	}
+	total := len(p.ImportsAdded) + len(p.ImportsRemoved)
+	s.Lead = fmt.Sprintf("**%d import %s**", total, plural(total, "change", "changes"))
+	if total > MaxItems {
+		s.Items = append(s.Items[:MaxItems], fmt.Sprintf("and %d more", total-MaxItems))
 	}
 	s.Text = strings.Join(parts, "; ") + "."
 	for i := range s.Claims {
@@ -270,14 +373,86 @@ func imports(d *delta.Delta) Sentence {
 	return s
 }
 
-func bodyOnly(d *delta.Delta) Sentence {
+func bodyOnly(d *delta.Delta, head *graph.Index) Sentence {
 	n := len(d.Nodes.BodyChanged)
 	if n == 0 {
 		return Sentence{}
 	}
 	// A count is not a triple; the sentence carries no claims. A rewrite
 	// that names nodes is validated claim by claim like any other.
-	return Sentence{Text: fmt.Sprintf("%d %s changed body only.", n, plural(n, "symbol", "symbols"))}
+	s := Sentence{Text: fmt.Sprintf("%d %s changed body only.", n, plural(n, "symbol", "symbols"))}
+	s.Lead, s.Items = kindList(d.Nodes.BodyChanged, head, "edited", "with the same signature")
+	return s
+}
+
+// definitions is the added or removed definitions (symbols), read from
+// the head graph for added and the base graph for removed. Entry points,
+// sinks and packages have sentences of their own.
+func definitions(d *delta.Delta, ix *graph.Index, what string) Sentence {
+	src := d.Nodes.Added
+	pred := PredAdded
+	if what == "removed" {
+		src, pred = d.Nodes.Removed, PredRemoved
+	}
+	var ids []string
+	for _, id := range src {
+		if graph.IDPrefix(id) == "sym" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		return Sentence{}
+	}
+	s := Sentence{Text: fmt.Sprintf("%s %s %s.", listNames(ids, 3), isAre(len(ids)), what)}
+	for _, id := range ids {
+		s.Claims = append(s.Claims, Claim{SubjectID: id, Predicate: pred, Sentence: s.Text})
+	}
+	s.Lead, s.Items = kindList(ids, ix, what, "")
+	return s
+}
+
+// kindList is the list form of a set of definitions: the lead counts them
+// by kind ("3 functions and 1 type added"), and the items name them with
+// their package. Test code is counted apart and not named, since a
+// reviewer reads the list for what the MR changes in the program.
+func kindList(ids []string, ix *graph.Index, verb, tail string) (string, []string) {
+	prog, tests := map[string]int{}, map[string]int{}
+	nTests := 0
+	var named []string
+	for _, id := range ids {
+		var n *graph.Node
+		if ix != nil {
+			n = ix.Node(id)
+		}
+		kind := ""
+		if n != nil {
+			kind = n.Attrs.SymbolKind
+		}
+		if n != nil && n.Attrs.Test {
+			tests[kind]++
+			nTests++
+			continue
+		}
+		prog[kind]++
+		named = append(named, id)
+	}
+	var lead string
+	switch {
+	case len(named) == 0:
+		lead = fmt.Sprintf("**%s %s in tests**", graph.DescribeKinds(tests, 0), verb)
+	default:
+		lead = fmt.Sprintf("**%s %s**", graph.DescribeKinds(prog, 0), verb)
+		if tail != "" {
+			lead += " " + tail
+		}
+		if nTests > 0 {
+			lead += fmt.Sprintf(", and %d in tests", nTests)
+		}
+	}
+	if len(named) == 0 {
+		return lead, nil
+	}
+	return lead, items(named, wherer(named, ix))
 }
 
 func suppressed(d *delta.Delta) Sentence {
@@ -290,7 +465,7 @@ func suppressed(d *delta.Delta) Sentence {
 		ids = append(ids, sp.Package)
 		s.Claims = append(s.Claims, Claim{SubjectID: sp.Package, Predicate: PredSuppressed})
 	}
-	s.Text = fmt.Sprintf("Changes under %s %s hidden because the package does not type-check at base or head.", listNames(ids, 3), isAre(len(ids)))
+	s.Text = fmt.Sprintf("Changes under %s are hidden because the %s not type-check at base or head.", listNames(ids, 3), plural(len(ids), "package does", "packages do"))
 	for i := range s.Claims {
 		s.Claims[i].Sentence = s.Text
 	}
@@ -310,6 +485,51 @@ func name(id string) string {
 		}
 	}
 	return "`" + graph.ShortName(id) + "`"
+}
+
+// wherer names definitions with their package, "`Create` in `orders`",
+// each package by the shortest trailing path unique among the packages
+// of ids, so two packages called `pipelines` do not read as one.
+func wherer(ids []string, ix *graph.Index) func(string) string {
+	pkgOf := func(id string) string {
+		if ix != nil {
+			if p := ix.PackageOf(id); p != "" {
+				return strings.TrimPrefix(p, "pkg:")
+			}
+		}
+		return graph.SymPackage(id)
+	}
+	seen := map[string]bool{}
+	var paths []string
+	for _, id := range ids {
+		if p := pkgOf(id); p != "" && !seen[p] {
+			seen[p] = true
+			paths = append(paths, p)
+		}
+	}
+	labels := graph.UniqueSuffixes(paths)
+	return func(id string) string {
+		if l := labels[pkgOf(id)]; l != "" {
+			return name(id) + " in `" + l + "`"
+		}
+		return name(id)
+	}
+}
+
+// items renders sorted IDs one per list item, up to MaxItems, then
+// "and N more".
+func items(ids []string, render func(string) string) []string {
+	ids = append([]string(nil), ids...)
+	sort.Strings(ids)
+	var out []string
+	for i, id := range ids {
+		if i == MaxItems {
+			out = append(out, fmt.Sprintf("and %d more", len(ids)-MaxItems))
+			break
+		}
+		out = append(out, render(id))
+	}
+	return out
 }
 
 func listNames(ids []string, max int) string {

@@ -85,6 +85,17 @@ func TestRichFixture(t *testing.T) {
 	if n := ix.Node("sym:" + M + "/pb.RegisterOrderServiceServer"); n == nil || !n.Attrs.Generated {
 		t.Error("generated flag on protoc output")
 	}
+	// doc is the first sentence of the doc comment, on funcs, methods and
+	// types alike (spec 6.1)
+	for id, want := range map[string]string{
+		"sym:" + M + "/svc.NewServer":        "NewServer wires the cache.",
+		"sym:" + M + "/svc.(*Server).Create": "Create is the implemented gRPC method.",
+		"sym:" + M + "/svc.Server":           "Server implements the gRPC service and serves HTTP.",
+	} {
+		if n := ix.Node(id); n == nil || n.Attrs.Doc != want {
+			t.Errorf("doc of %s = %+v, want %q", id, n, want)
+		}
+	}
 	for _, n := range doc.Nodes {
 		if n.Kind == graph.KindSymbol && strings.Contains(n.Name, "$") {
 			t.Errorf("closure or wrapper emitted as a node: %s", n.ID)

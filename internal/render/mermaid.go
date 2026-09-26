@@ -28,32 +28,32 @@ import (
 // is written only when that kind is drawn: pkgMap for the package map, delta
 // for any of dataflow, call paths or module wiring.
 func Key(pkgMap, delta bool) string {
-	var b strings.Builder
-	b.WriteString("**Key.** A rounded box is an entry point, a double-bordered box a package, a cylinder a data store")
+	colours := []string{"🟩 added", "🟥 removed (dashed)"}
 	if delta {
-		b.WriteString(", a plain box a function or definition")
-	}
-	b.WriteString(". Green is added, red dashed removed")
-	if delta {
-		b.WriteString(", amber a changed signature")
+		colours = append(colours, "🟨 signature changed")
 	}
 	if pkgMap {
-		b.WriteString(", purple a package this MR changes code in")
+		colours = append(colours, "🟪 package this MR changes")
 	}
-	b.WriteString(", grey unchanged context drawn for orientation.")
+	colours = append(colours, "⬜ unchanged, drawn for context")
+	shapes := "**rounded** entry point · **double border** package · **cylinder** data store"
+	if delta {
+		shapes += " · **plain box** function or type"
+	}
+	lines := []string{strings.Join(colours, " · "), shapes}
+	if delta {
+		lines = append(lines, "Arrows take their colour the same way: `──▶` call · `┈┈▶` inferred call · `╌╌▶` dynamic dispatch")
+	}
 	switch {
-	case delta && pkgMap:
-		b.WriteString(" Arrows take the same colours; a dotted arrow is an inferred call, a dashed one dynamic dispatch." +
-			" In the package map an arrow is an import and an outer box a directory.")
-	case delta:
-		b.WriteString(" Arrows take the same colours; a dotted arrow is an inferred call, a dashed one dynamic dispatch.")
+	case pkgMap && delta:
+		lines = append(lines, "In the package map an arrow is an import and an outer box a directory")
 	case pkgMap:
-		b.WriteString(" Arrows take the same colours; an arrow is an import and an outer box a directory.")
+		lines = append(lines, "In the package map an arrow is an import, coloured the same way, and an outer box a directory")
 	}
 	if delta {
-		b.WriteString(" `*` marks a definition whose body also changed, and `name +N more` is a group of N definitions drawn as one box.")
+		lines = append(lines, "`name*` body also changed · `+N more` N definitions drawn as one box")
 	}
-	return b.String()
+	return "**Key**\n\n- " + strings.Join(lines, "\n- ")
 }
 
 // classDefs is the styling preamble, one line per class, emitted only for
@@ -74,6 +74,12 @@ var classDefs = map[string]string{
 
 // Mermaid renders one diagram as flowchart LR source (without fences).
 func Mermaid(dg *filter.Diagram) string {
+	return mermaidNamed(dg, shortNames(dg))
+}
+
+// mermaidNamed is Mermaid with the package short names given, so diagrams
+// read side by side can share one naming.
+func mermaidNamed(dg *filter.Diagram, names map[string]string) string {
 	var b strings.Builder
 	b.WriteString("flowchart LR\n")
 	classes := map[string][]string{}
@@ -94,8 +100,6 @@ func Mermaid(dg *filter.Diagram) string {
 			fmt.Fprintf(&b, "  classDef %s %s\n", c, def)
 		}
 	}
-	names := shortNames(dg)
-
 	// A node is boxed under its package subgraph (call paths) or under its
 	// Group (the baseline map, where the nodes are packages themselves).
 	byBox := map[string][]filter.Node{}
@@ -239,13 +243,7 @@ func labelIn(n filter.Node, names map[string]string) string {
 func shortPkg(p string) string { return suffix(p, 1) }
 
 // suffix returns the last n path segments of p.
-func suffix(p string, n int) string {
-	parts := strings.Split(p, "/")
-	if n >= len(parts) {
-		return p
-	}
-	return strings.Join(parts[len(parts)-n:], "/")
-}
+func suffix(p string, n int) string { return graph.PathSuffix(p, n) }
 
 func pickName(names map[string]string, pkg string) string {
 	if l, ok := names[graph.PkgID(pkg)]; ok {
@@ -263,42 +261,31 @@ func pickName(names map[string]string, pkg string) string {
 // which reads as one box duplicated rather than two different packages.
 // Keyed by both the pkg: ID and the bare import path, since subgraphs are
 // listed as IDs and nodes carry the path.
-func shortNames(dg *filter.Diagram) map[string]string {
+func shortNames(dg *filter.Diagram) map[string]string { return shortNamesOf(dg) }
+
+// shortNamesOf is shortNames over several diagrams read side by side, such
+// as the per-entry-point dataflow diagrams: split apart, each drew a lone
+// `pipelines` box although the note has three packages of that name.
+func shortNamesOf(dgs ...*filter.Diagram) map[string]string {
 	paths := map[string]bool{}
-	for _, n := range dg.Nodes {
-		if n.Package != "" && (n.Kind == filter.KindPackage || n.Kind == filter.KindMore) {
-			paths[n.Package] = true
+	for _, dg := range dgs {
+		for _, n := range dg.Nodes {
+			if n.Package != "" && (n.Kind == filter.KindPackage || n.Kind == filter.KindMore) {
+				paths[n.Package] = true
+			}
 		}
-	}
-	for _, id := range dg.Subgraphs {
-		paths[strings.TrimPrefix(id, "pkg:")] = true
+		for _, id := range dg.Subgraphs {
+			paths[strings.TrimPrefix(id, "pkg:")] = true
+		}
 	}
 	all := make([]string, 0, len(paths))
 	for p := range paths {
 		all = append(all, p)
 	}
-	sort.Strings(all)
 	out := map[string]string{}
-	for _, p := range all {
-		depth := 1
-		for {
-			label := suffix(p, depth)
-			clash := false
-			for _, q := range all {
-				if q != p && suffix(q, depth) == label {
-					clash = true
-					break
-				}
-			}
-			// Stop widening when the whole path is on show: two distinct
-			// packages cannot share one, so this always terminates.
-			if !clash || label == p {
-				out[p] = label
-				out[graph.PkgID(p)] = label
-				break
-			}
-			depth++
-		}
+	for p, label := range graph.UniqueSuffixes(all) {
+		out[p] = label
+		out[graph.PkgID(p)] = label
 	}
 	return out
 }

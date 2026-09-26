@@ -118,6 +118,10 @@ type NodeAttrs struct {
 	EntryKind      string `json:"entry_kind,omitempty"`
 	SinkKind       string `json:"sink_kind,omitempty"`
 	SinkNameSource string `json:"sink_name_source,omitempty"`
+	// Doc is the first sentence of the definition's doc comment or
+	// docstring. Optional, and never part of a fingerprint or body hash:
+	// editing a comment is not a structural change.
+	Doc string `json:"doc,omitempty"`
 }
 
 // Edge is section 6.2.

@@ -71,7 +71,8 @@ project. Both files document their variables.
 | 8.3 weekly delta and attribution | `internal/weekly` | joins cached per-MR deltas; MR list from the merge requests API |
 | 9 filtering | `internal/filter` | steps 1 to 6 as written, every tie by ID |
 | 10 rendering | `internal/render` | Mermaid, note assembly, graphviz dot fallback |
-| 10.1 baseline view | `internal/filter` `BaselineView`, `internal/render` `writeBaseline` | the package map and touched-package table; the kept reach on the dataflow diagram is in `internal/filter` `dataflow` |
+| 10.1 baseline view | `internal/filter` `BaselineView`, `internal/render` `writeBaseline` | the package map and touched-package list; the kept reach on the dataflow diagram is in `internal/filter` `dataflows` |
+| 10.3 call stacks | `internal/filter` `stacks`, `internal/render` `writeStacks` | the tree over head ∪ base; the prose beside each diagram is `internal/render` `prose.go` |
 | 10 weekly pinned layout | `internal/weekly` `Layout` | `pin=true`, `notranslate`, reset policy |
 | 11 narration | `internal/narrate` | template, claim validator, optional OpenAI-compatible rewrite |
 | 13 configuration | `internal/config` | defaults, `config_hash` |
@@ -140,6 +141,14 @@ project. Both files document their variables.
   (purple and imports when the map is drawn; amber, `*` and the call arrows
   when a delta diagram is). What the map folded or hid to fit is a caption
   under the map.
+- **The top of the note is a list (sections 11, 14.1).** Each narration
+  template is written twice from the same facts: a sentence, which the LLM
+  rewrite is given and the claim validator checks, and a list item, a bold
+  count with the names under it, which the note prints. The four standing
+  counts that are zero share one line under the list. `narrate.Sentence`
+  carries both forms; `cmd_render.go` picks one per sentence.
+- **Counts name what they count.** `graph.DescribeKinds` turns counts per
+  symbol kind into "3 functions and 1 type"; the note never says "symbols".
 - **Colliding package labels are widened (section 10).** Each package drawn
   in a diagram takes the shortest trailing path unique within that diagram,
   so two packages called `pipelines` are not two boxes with one name. The

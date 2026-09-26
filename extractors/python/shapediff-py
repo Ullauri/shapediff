@@ -117,6 +117,23 @@ def file_tokens(src):
     return out
 
 
+DOC_CAP = 160
+
+
+def synopsis(node):
+    """The doc attr: the first sentence of a docstring, cut to DOC_CAP."""
+    text = ast.get_docstring(node)
+    if not text:
+        return ""
+    para = " ".join(text.split("\n\n", 1)[0].split())
+    m = re.search(r"[.!?](\s|$)", para)
+    if m:
+        para = para[:m.start() + 1]
+    if len(para) > DOC_CAP:
+        para = para[:DOC_CAP - 1].rstrip() + "…"
+    return para
+
+
 def body_hashes(toks, start, end, recv):
     """Body fields for the tokens in [start, end] (row, col) inclusive."""
     norm, raw, rec = [], [], []
@@ -548,6 +565,9 @@ class Extractor:
     def klass(self, m, node, qual):
         a = self.base_attrs(m, qual)
         a.update(symbol_kind="type", signature="class")
+        doc = synopsis(node)
+        if doc:
+            a["doc"] = doc
         nid = self.sym_id(m, qual)
         self.add_node(nid, kind="symbol", name=qual, package=m.pkg, file=m.rel, line=node.lineno, attrs=a)
         for bm, bq in self.r.internal_bases(m, qual):
@@ -566,6 +586,9 @@ class Extractor:
         if node.returns is not None:
             sig += f" -> {ast.unparse(node.returns)}"
         a.update(symbol_kind="method" if cls else "func", signature=sig)
+        doc = synopsis(node)
+        if doc:
+            a["doc"] = doc
         body = node.body
         if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
                 and isinstance(body[0].value.value, str):
@@ -665,6 +688,59 @@ class Extractor:
                 v = st.targets[0].id
                 var_tables[v] = var_tables.get(v, set()) | tabs
                 var_writes[v] = var_writes.get(v, False) or w
+        # The unit of work: setting an attribute on a row fetched from the
+        # session writes its table when the session flushes, with no db call
+        # naming the table. rows holds the variables bound to fetched rows:
+        # a session read, a result method chain on one, list()/next() of
+        # those, an index into them, or a loop over them. A value merely
+        # built from rows (a response model) is not a row.
+        rows = {}
+
+        def rows_of(expr):
+            while True:
+                if isinstance(expr, ast.Await):
+                    expr = expr.value
+                elif isinstance(expr, ast.Subscript):
+                    expr = expr.value
+                elif isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) \
+                        and expr.func.id in ("list", "tuple", "next", "iter", "sorted") and expr.args:
+                    expr = expr.args[0]
+                elif isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute):
+                    recv = dotted_of(expr.func.value) or ""
+                    if DB_RECEIVER.search(recv) and expr.func.attr in DB_READS:
+                        tabs = set()
+                        for a in list(expr.args) + [k.value for k in expr.keywords]:
+                            tabs |= tables_of(a)[0]
+                        return tabs
+                    expr = expr.func.value
+                elif isinstance(expr, ast.Name):
+                    return rows.get(expr.id, set())
+                else:
+                    return set()
+
+        for st in ast.walk(fn):
+            if isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Name):
+                tabs = rows_of(st.value)
+            elif isinstance(st, (ast.For, ast.AsyncFor)) and isinstance(st.target, ast.Name):
+                tabs = rows_of(st.iter)
+            else:
+                continue
+            if tabs:
+                v = st.targets[0].id if isinstance(st, ast.Assign) else st.target.id
+                rows[v] = rows.get(v, set()) | tabs
+        dirty = set()
+        for st in ast.walk(fn):
+            if isinstance(st, ast.Assign):
+                targets = st.targets
+            elif isinstance(st, (ast.AugAssign, ast.AnnAssign)):
+                targets = [st.target]
+            else:
+                continue
+            for t in targets:
+                if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name):
+                    dirty |= rows.get(t.value.id, set())
+        for t in sorted(dirty):
+            self.sink("db", t, "table", nid, "writes")
 
         # names bound inside the function shadow module-level ones
         locals_ = set()

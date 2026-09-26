@@ -160,7 +160,8 @@ at all. The delta engine reads it (section 8.4); nothing else does.
     "signature": "func (*Service) Create(ctx context.Context, req CreateReq) (*Order, error)",
     "entry_kind": null,        // http | grpc | worker | cron | cli | loop   (entrypoint nodes)
     "sink_kind": null,         // db | queue | http_client | cache | fs (sink nodes)
-    "sink_name_source": null   // table | package   (sink nodes; section 7.3)
+    "sink_name_source": null,  // table | package   (sink nodes; section 7.3)
+    "doc": "Create validates req and stores the order."  // optional; see below
   },
   "fingerprint": "sha256 of normalized body tokens: identifiers kept, literals replaced by kind, whitespace and comments removed",
   "fingerprint_recv": "as fingerprint, with every occurrence of the receiver type name replaced by a placeholder token (methods only)",
@@ -196,6 +197,13 @@ ID conventions (stable across SHAs by construction):
   `entry:grpc:orders.OrderService/Create`, `entry:worker:process_refund`.
 - `sink:<sink_kind>:<name>` e.g. `sink:db:orders`, `sink:queue:refunds`,
   `sink:http_client:payments`.
+
+`doc` is optional. It holds the first sentence of the definition's doc
+comment (Go) or docstring (Python), cut to 160 characters, and the call
+stacks of section 10.3 quote it. It is never part of a fingerprint or body
+hash, since editing a comment is not a structural change, and no invariant
+or conformance assertion reads it, so an extractor that leaves it out still
+conforms.
 
 Line numbers and file paths are attributes, never part of the ID, so a
 function that moves files is the same node.
@@ -655,7 +663,7 @@ output section 3 forbids. So:
   A node with no package (a sink) is suppressed when every edge touching
   it comes from a suppressed package; an entrypoint is under its
   registration site's package (section 6.1).
-- The headline says so in one line: "head does not compile:
+- The note says so in one line at its top: "head does not compile:
   `internal/orders` (14 changes hidden)". Not a generic extraction failure,
   because reviewers will learn to ignore a generic one.
 - Reachability is computed only over packages `ok` in both graphs; an
@@ -719,9 +727,12 @@ Algorithm:
       added/removed status into one "`pkg` +N more" node, **exempting** nodes
       on a `changed_paths` route and `signature_changed` nodes, which are
       the MR's subject.
-   e. Split into one diagram per changed entrypoint plus one "not reachable
-      from any entrypoint" diagram, each budgeted separately, and put all
-      but the first in a collapsed section.
+   e. Split into one diagram per entrypoint drawn, changed ones first, plus
+      one "not reachable from any entrypoint" diagram for what is left, each
+      budgeted separately, and put all but the first in a collapsed section.
+      An unchanged entry point is drawn when it calls a changed signature;
+      splitting only by changed ones left it in the remainder, under a title
+      that said no entry point reached it.
    f. **Terminal rule.** If a single diagram is still over budget, keep the
       top-`B` nodes by priority and the edges among them, and add one
       "+N more" node with a count. If the rendered source still exceeds
@@ -739,10 +750,13 @@ Algorithm:
       with its permalink, in the note's details table, and the count is
       reported there; nothing is dropped silently. If a diagram has no edges
       left at the end, it is not drawn at all: there were no paths to show.
-5. **Dataflow diagram** is drawn separately and independently of budget:
-   one row per changed entrypoint, showing `reach_added` and
-   `reach_removed` only, at package-and-sink granularity. This diagram is
-   almost always small.
+5. **Dataflow diagrams** are drawn separately and independently of budget:
+   **one diagram per changed entrypoint**, showing `reach_added` and
+   `reach_removed` at package-and-sink granularity (and the kept reach of
+   section 10.1). Each is small by construction. They were one diagram with
+   a row per entry point, and two entry points reaching the same packages
+   drew a knot of crossing edges in which a reader could not tell whose
+   reach was whose.
 6. **Module wiring diagram** is drawn only when `packages.added`,
    `packages.removed`, or `imports_added/removed` is non-empty. Shows
    touched packages and their imports, added edges green, removed red.
@@ -770,10 +784,35 @@ notes and it needs no image hosting.
   Inferred edges dotted. One key per note, above its first diagram (the
   package map of 10.1 when it is drawn); it names the shapes as well as the
   colours, and writes a clause only when the note draws a diagram it
-  describes.
+  describes. It is a short list, one line per concern (colours as emoji
+  swatches, shapes, arrows, the package map, marks), not a paragraph: a
+  reader looks a symbol up in it, and a paragraph has to be read through
+  to find one.
 - A node that is drawn because it lies on a `changed_paths` route and is
   also `body_changed` carries a `*` suffix on its label, meaning "body also
   changed here". It is a badge, not a colour; amber is taken.
+- **Every diagram has text that reads it**, printed beside it and
+  generated from the diagram and the graph behind it, never from the
+  delta, so it cannot claim what the picture does not show. It says what
+  the picture cannot; restating the arrows in words ("it reaches `a`, `b`
+  and `c`") tells the reader nothing the boxes did not.
+  - A **dataflow** diagram gets what the entry point is for and why each
+    arrow is there, read off the entry point's call stack (10.3): whether
+    it is new, removed or its reach changed, and the handler that serves
+    it; the docstring of the handler, or of the first function below it
+    that has one (a type's docstring describes the type, not the call),
+    quoted and attributed, never written by the tool; then one list item
+    per box, the tables first, then the packages where the stack meets
+    changed code, then context. A table says whether it is read, written or
+    both and by which definition; a package names the definitions the stack
+    calls in it, with the docstring when it names one. An entry point whose
+    reach changed gets the items under "now also reaches", "no longer
+    reaches" and "still reaches".
+  - A **call-path** diagram gets where it starts and then a list, one item
+    per package and status, swatched as in the key: what is new, removed or
+    has a changed signature, then what is drawn as context, each definition
+    named and linked to its line; a "`pkg` +N more" box is opened up by name
+    there, since the box alone does not say what it holds.
 - Node labels are short names (`Service.Create`). Packages appear as
   either a `subgraph` box (when the package has symbol nodes drawn) or a
   collapsed `pkg:` node (when it was collapsed in section 9), **never both
@@ -826,13 +865,19 @@ diagram (section 14.1), and has three parts, all read from the base graph
    SHA, and how many external modules are not drawn, then how many
    packages the MR changes code in. The base SHA is printed: it is the
    identity of the baseline.
-2. **One table row per touched package** (section 9's definition):
-   symbol count at the base; what the MR did there (added, removed,
-   changed, renamed counts, or "new package" / "removed"); which internal
-   packages import it (the blast radius); which entry points reach it
-   narrowly (section 7.4) or are registered in it; which sinks its symbols
-   read or write. Lists are cut at four names plus "+N". Each package
-   links to its directory tree at the base SHA.
+2. **One list item per touched package** (section 9's definition), not a
+   table row: its size at the base counted by kind ("96 functions, 40
+   methods, 17 types and 3 constants", every kind, since "others" would
+   say no more than "symbols" did); then one
+   line per kind of change, the count with the definitions it names ("19
+   added: `QuizHandler`, `GetQuiz`, ... and 13 more", five names, program
+   code before tests), a changed definition split into "changed signature"
+   and "edited, same signature", or "new package" / "removed package" in
+   place of the count; then which internal packages import it (the blast
+   radius), which entry points reach it narrowly (section 7.4) or are
+   registered in it, and which sinks its symbols read or write, each cut
+   at four names plus "+N". A line with nothing to say is left out. Each
+   package links to its directory tree at the base SHA.
 3. **The package map**: every internal package as a node, boxed by
    directory (the parent path relative to the packages' common root),
    import edges among them, one node per (package, entry kind) labelled
@@ -1029,14 +1074,71 @@ Considered and not taken:
   script version, could not be diffed as SVG, and costs a large inline
   bundle for a layout `dot` already does.
 
+### 10.3 Call stacks
+
+The diagrams answer "which packages does this entry point now touch". A
+reviewer's next question is "in what order, through what, and what else runs
+next to the change", which a graph drawn left to right answers badly and an
+indented list answers well. The note carries a **call stack** per entry
+point, after the call-path diagrams.
+
+**Which entry points.** Every entry point whose status is not `unchanged`,
+and every unchanged entry point from whose handler changed code is reachable:
+a route whose handler calls a changed signature is the MR's blast radius even
+though its reach did not move. Changed entry points first, then by ID. At
+most eight are listed; the rest are named in one line.
+
+**The tree.** It is built over the union of the head and base graphs, so a
+call the MR removed can be shown, on `calls`, `reads` and `writes` edges,
+dropping dynamic edges wider than `k` (section 7.4) and test and generated
+definitions. It starts at the entry point's handler and walks depth first.
+Under each line are listed, in this order: every call that leads to changed
+code (a node from which a `nodes.added`, `removed`, `signature_changed` or
+`body_changed` symbol is reachable, the changed nodes included) or is itself
+an added or removed edge; then the sinks it reads or writes; then up to four
+other calls as context, with the rest folded into one "+N more" line that
+names them. Only the calls that lead to changed code are expanded; under a
+context line its own calls are counted, not listed. A definition already
+expanded in the stack is listed again where it is called but not expanded
+again. Depth is capped at twelve and a stack at forty lines, and a cut stack
+says so.
+
+**Each line** has a marker column, `+` added, `-` removed, `~` signature
+changed, blank for unchanged, taken from the node, or from the edge into it
+when the node itself did not change (a new call to old code is a `+` line
+labelled "newly called"). `*` marks a body change as it does in the
+diagrams. The line opens to the definition's signature (a two-line diff for
+a changed signature), its `doc` (section 6.1) and a permalink. The doc is
+quoted from the source, never written by the tool: section 3's line against
+explaining the code holds.
+
+**Markup.** Each line is its own `<details>` element, the tree drawn with box
+characters inside the summary's `<code>`, spaces as `&nbsp;` so the columns
+survive HTML whitespace rules. Nested lists or nested `<details>` would draw
+the tree with less markup, but markdown inside HTML inside list items is the
+part of GitLab's renderer least safe to rely on, and a hover tooltip is not
+available at all in a note. The note already relies on `<details>`,
+`<summary>`, `<code>` and markdown links, and the stacks use nothing else.
+Stacks after the third go in one collapsed section.
+
 ## 11. Narration
 
-Narration in v1 is a **deterministic template** over the delta. Eight
-sentence templates, one per fact class, in this order: entrypoint reach
-changes; signature changes and their caller counts; renames; module
-wiring; count of body-only changes; suppressed packages. Each template
-takes IDs from the delta, so every sentence is a claim the diagram also
-makes. The headline line in section 14.1 is the first of these templates.
+Narration in v1 is a **deterministic template** over the delta. One
+sentence template per fact class, in this order: entry points added,
+removed and whose reach changed; signature changes and their caller
+counts; renames; definitions added and removed; packages and module
+wiring; body-only changes; suppressed packages. Each template takes IDs
+from the delta, so every sentence is a claim the diagram also makes.
+
+Each template is written twice from the same facts. As a **sentence**, it
+is what the rewrite below is given and what its claims are checked
+against. As a **list item**, it is what the note prints (section 14.1): a
+bold count, by kind where it counts definitions ("3 functions and 1 type
+added"), with the names nested under it one per line, up to eight and then
+"and N more". Test code is counted apart and not named. A rewritten
+sentence replaces its list item. The list form of a fact already on the
+page is empty: an added endpoint's reach is nested under the endpoint, and
+the suppression line stands at the top of the note.
 This ships in phase 3, so the note is tested complete.
 
 An **optional LLM rewrite** (phase 4) may replace the templated paragraph
@@ -1061,7 +1163,8 @@ only under validators enforced after generation, not by prompting:
 
 Backend for the rewrite: any OpenAI-compatible endpoint, configured per
 instance. A local model on the CI host is acceptable; the input is
-structured and small. Phase 4's gate is an A/B against the template: if
+structured and small. The rewrite is offered the first eight template
+sentences; any past the eighth stay as the template wrote them. Phase 4's gate is an A/B against the template: if
 reviewers do not prefer the rewrite, the LLM, its endpoint and its
 configuration never ship.
 
@@ -1185,19 +1288,25 @@ branch-only pipelines never fire that event. Steps:
 
 Note layout, top to bottom:
 
-- One headline line: `1 endpoint added, 2 endpoints' reach changed, 1
-  signature changed (4 callers), 0 packages added.` Followed, when
-  applicable, by the suppression line from section 8.4.
-- Narration, up to eight sentences.
+- **What changed**: the suppression line from section 8.4 when there is
+  one; then the narration of section 11 in its list form, one item per
+  fact class, each a bold count with what it counts named under it, one
+  per line; then one line naming which of the four standing counts
+  (endpoints added, endpoints' reach changed, signatures changed, packages
+  added) are zero: `No endpoint's reach changed and no package was
+  added.` A zero is news to a reviewer, so it is said, but in one line and
+  not as four list items. With `narration: off` the counts stay and the
+  names under them go.
 - "Where this lands" (section 10.1): the size line, the touched-package
   table and the package map. Before the diagrams, because it is the frame
   they are read in; after the narration, because the reviewer who knows
   the repo reads the summary first and skips the frame.
-- Dataflow diagram (if any entrypoint changed), with the kept reach in
-  grey (section 10.1).
-- Call-path diagram.
+- Dataflow diagrams (if any entrypoint changed), one per entry point, each
+  with its sentence, with the kept reach in grey (section 10.1).
+- Call-path diagram, with its paragraph (section 10).
+- Call stacks (section 10.3), when an entry point reaches changed code.
 - Module wiring diagram (if any).
-- `<details>`: full node table with permalinks, renames, body-only changes,
+- `<details>`: full node table, each node linked to its line, renames, body-only changes,
   wide-reach changes, suppressed packages, warnings, extractor version,
   timing.
 
@@ -1592,3 +1701,76 @@ something a reviewer can trust without checking.
   and the call arrows only when a delta diagram is. What the map folded or
   hid to fit stays under the map as a caption, since it is about that
   diagram and not a key to it.
+
+### Added after v0.5 (owner's review of a real note, 2026-09-26)
+
+Read against the note for devlogplus !27, which adds two dismiss routes and
+widens a list endpoint's filters:
+
+- **One dataflow diagram per entry point** (section 9, step 5). Two new
+  routes reaching the same four packages drew as one diagram of crossing
+  edges. Each entry point now has its own small diagram and the sentence that
+  reads it.
+- **A paragraph under every diagram** (section 10), generated from the
+  diagram, naming and linking what changed package by package and opening up
+  "+N more" boxes, so the definitions a diagram draws are one click from the
+  code.
+- **Call stacks** (section 10.3, new): per entry point that reaches changed
+  code, the calls from its handler down to the change, with the calls made
+  alongside it as context and every line opening to a signature, doc line and
+  permalink. The owner's example was an indented list with `+`/`-` lines;
+  hover was asked for and is not possible in a GitLab note, so a line opens
+  instead.
+- **An optional `doc` attr** (section 6.1) on symbol nodes, from Go doc
+  comments and Python docstrings. Optional so every existing extractor still
+  conforms.
+- **Step 4e splits by every entry point drawn** (section 9). `GET
+  /pipelines/runs`, unchanged but calling two changed signatures, sat in the
+  diagram titled "not reachable from any entrypoint".
+- **The details table links the node name** (section 14.1) instead of
+  spending a column on `file:line`; the separate column squeezed the names
+  into a sliver that broke mid-word.
+
+Second pass, same note, 2026-09-26. The owner kept the call stacks and the
+details table and sent back the rest as a wall of text:
+
+- **The key is a list** (section 10): one line per concern, colours as
+  swatches. As a paragraph it read as a spec, not something to glance at.
+- **Call-path text is a list** (section 10): one item per package and
+  status, swatched like the boxes, where it had been a run of clauses.
+- **Dataflow text says what the diagram cannot** (section 10). It had
+  repeated the arrows in words. It now quotes what the entry point is for
+  from a docstring, names its handler, and for each box says why it is
+  reached: which definition reads or writes a table, which definitions the
+  stack calls in a package.
+- **A read and a write of one table are one stack line** (section 10.3),
+  "reads and writes", not a read line and then the table "listed above".
+- **The Python extractor sees unit-of-work writes.** Setting an attribute
+  on a row fetched from the session and flushing wrote the table with no
+  `add` or `update` call to see, so both dismiss functions were drawn as
+  reads. A row is a variable bound to a session read, a result method chain
+  on one, `list()`/`next()` of those, an index into them or a loop over
+  them; a value merely built from rows, such as a response model, is not
+  one.
+
+Third pass, 2026-09-26, the owner's review of the notes for homechan,
+devlogplus !27 and curriculumcompass !4. Everything that had to be read
+across went down the page:
+
+- **The headline and narration are one list** (sections 11 and 14.1). The
+  headline was a line of four counts and the narration a paragraph naming
+  what they counted, so a reader went across both to learn what "5
+  endpoints added" were. Each fact class is now a bold count with the names
+  under it, one per line; the zero counts are one line under the list.
+- **Definitions added and removed are a fact class** (section 11). An MR
+  that added a job handler, and nothing a route reaches, had a headline of
+  zeros and one line about two edited bodies; the thirteen new definitions
+  were not mentioned before the diagrams.
+- **"symbols" is gone from the note** (sections 10.1 and 11). The reader
+  did not know what it meant. Counts say what they count, by kind: "96
+  functions, 40 methods and 17 types", "2 functions edited with the same
+  signature".
+- **The touched-package table is a list** (section 10.1), one item per
+  package, naming what was added, removed, renamed or changed there rather
+  than counting it. The six columns wrapped to a word a line at note width,
+  and "3 added, 1 changed" did not say what was added.

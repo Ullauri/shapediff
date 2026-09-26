@@ -53,6 +53,15 @@ type TouchedPackage struct {
 	// added package), tests included. Added, Removed, Changed and Renamed
 	// count what this MR did to them; Changed is a signature or body change.
 	Symbols, Added, Removed, Changed, Renamed int
+	// Kinds is Symbols by symbol kind (func, method, type...), so the note
+	// can say what it counted instead of "symbols".
+	Kinds map[string]int
+	// The IDs behind the counts, so the note can say what was added and
+	// not only how much: program code first, then tests, each by ID.
+	// Changed splits into signature and body-only; Renamed holds the new
+	// IDs, with RenamedFrom the old ID for each.
+	AddedIDs, RemovedIDs, SignatureIDs, BodyIDs, RenamedIDs []string
+	RenamedFrom                                             map[string]string
 	// ImportedBy lists the internal packages that import this one, as
 	// root-relative labels, sorted.
 	ImportedBy []string
@@ -410,10 +419,14 @@ func (m *mapBuilder) touchedRows() []TouchedPackage {
 		}
 		ix := m.ix[id]
 		pc := m.changed[id]
-		row := TouchedPackage{ID: id, Label: m.label(id), Status: st, Added: pc.added, Removed: pc.removed, Changed: pc.changed, Renamed: pc.renamed}
+		row := TouchedPackage{ID: id, Label: m.label(id), Status: st, Added: pc.added, Removed: pc.removed, Changed: pc.changed, Renamed: pc.renamed,
+			Kinds: map[string]int{}, AddedIDs: m.programFirst(pc.addedIDs, m.b.head), RemovedIDs: m.programFirst(pc.removedIDs, m.b.base),
+			SignatureIDs: m.programFirst(pc.sigIDs, m.b.head), BodyIDs: m.programFirst(pc.bodyIDs, m.b.head),
+			RenamedIDs: m.programFirst(pc.renamedIDs, m.b.head), RenamedFrom: pc.renamedFrom}
 		for _, n := range m.nodes[ix][id] {
 			if n.Kind == graph.KindSymbol {
 				row.Symbols++
+				row.Kinds[n.Attrs.SymbolKind]++
 			}
 			if row.Dir == "" && n.File != "" && !n.Attrs.Test {
 				row.Dir = path.Dir(n.File)
@@ -438,8 +451,28 @@ func (m *mapBuilder) touchedRows() []TouchedPackage {
 	return rows
 }
 
-// pkgChanges is the delta's node changes in one package.
-type pkgChanges struct{ added, removed, changed, renamed int }
+// pkgChanges is the delta's node changes in one package, counted and by ID.
+type pkgChanges struct {
+	added, removed, changed, renamed                  int
+	addedIDs, removedIDs, sigIDs, bodyIDs, renamedIDs []string
+	renamedFrom                                       map[string]string
+}
+
+// programFirst sorts IDs with program code before test code, each by ID.
+func (m *mapBuilder) programFirst(ids []string, ix *graph.Index) []string {
+	out := append([]string{}, ids...)
+	test := func(id string) bool {
+		n := ix.Node(id)
+		return n != nil && n.Attrs.Test
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if a, b := test(out[i]), test(out[j]); a != b {
+			return !a
+		}
+		return out[i] < out[j]
+	})
+	return out
+}
 
 func (c pkgChanges) total() int { return c.added + c.removed + c.changed + c.renamed }
 
@@ -455,19 +488,26 @@ func (m *mapBuilder) changedPerPackage() map[string]pkgChanges {
 		}
 	}
 	for _, id := range d.Nodes.Added {
-		count(head, id, func(pc *pkgChanges) { pc.added++ })
+		count(head, id, func(pc *pkgChanges) { pc.added++; pc.addedIDs = append(pc.addedIDs, id) })
 	}
 	for _, id := range d.Nodes.BodyChanged {
-		count(head, id, func(pc *pkgChanges) { pc.changed++ })
+		count(head, id, func(pc *pkgChanges) { pc.changed++; pc.bodyIDs = append(pc.bodyIDs, id) })
 	}
 	for _, s := range d.Nodes.SignatureChanged {
-		count(head, s.ID, func(pc *pkgChanges) { pc.changed++ })
+		count(head, s.ID, func(pc *pkgChanges) { pc.changed++; pc.sigIDs = append(pc.sigIDs, s.ID) })
 	}
 	for _, id := range d.Nodes.Removed {
-		count(base, id, func(pc *pkgChanges) { pc.removed++ })
+		count(base, id, func(pc *pkgChanges) { pc.removed++; pc.removedIDs = append(pc.removedIDs, id) })
 	}
 	for _, r := range d.Nodes.Renamed {
-		count(head, r.To, func(pc *pkgChanges) { pc.renamed++ })
+		count(head, r.To, func(pc *pkgChanges) {
+			pc.renamed++
+			pc.renamedIDs = append(pc.renamedIDs, r.To)
+			if pc.renamedFrom == nil {
+				pc.renamedFrom = map[string]string{}
+			}
+			pc.renamedFrom[r.To] = r.From
+		})
 	}
 	return c
 }

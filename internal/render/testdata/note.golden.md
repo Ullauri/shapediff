@@ -195,7 +195,7 @@ flowchart LR
 
 **Renames**
 
-- `Old` → `Older` ? (similarity)
+- `Old` → `Older` (probably: similar body)
 
 **Body-only changes**
 

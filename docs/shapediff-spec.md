@@ -579,7 +579,8 @@ hierarchical, coarse to fine:
    equal after renaming the identifier, and Jaccard similarity estimated
    from `body_sketch` at least 0.67 (equivalent to Dice 0.8), taken as a
    **mutual best match** in both directions: `renamed`, via `similarity`,
-   confidence medium. Shown with a "?" badge.
+   confidence medium. Shown as "probably", in the summary list and in
+   the details list.
 5. Everything else stays added/removed.
 
 Git's own file rename detection (`git diff -M --name-status base..head`)
@@ -1804,3 +1805,9 @@ had not reached another. Fixes only; no new command, section or chrome.
   "unchanged", so one grey box had two names; it now carries the key's
   words and swatches. An entry point's or a sink's package cell was empty,
   which read as missing data; it now says "entry point" or "db sink".
+- **A rename says why it was matched, in words** (section 8.1). The
+  details list printed `` `Old` → `New` ? (similarity) ``: a "?" the key
+  does not explain, beside the name of an algorithm step. It now reads
+  "(probably: similar body)", and "identical body", "same handler",
+  "moved with its package" or "moved with its type" for the others,
+  matching the summary list's "(probably)".

@@ -500,11 +500,16 @@ func writeLists(b *strings.Builder, in NoteInput) {
 	if len(d.Nodes.Renamed) > 0 {
 		b.WriteString("\n**Renames**\n\n")
 		for _, r := range d.Nodes.Renamed {
-			q := ""
-			if r.Confidence == "medium" {
-				q = " ?"
+			why := renameEvidence[r.Via]
+			if why == "" {
+				why = "matched by " + r.Via
 			}
-			fmt.Fprintf(b, "- `%s` → `%s`%s (%s)\n", mdEsc(graph.ShortName(r.From)), mdEsc(graph.ShortName(r.To)), q, r.Via)
+			if r.Confidence == "medium" {
+				// The summary list says "(probably)"; a "?" here was a
+				// code the key does not explain.
+				why = "probably: " + why
+			}
+			fmt.Fprintf(b, "- `%s` → `%s` (%s)\n", mdEsc(graph.ShortName(r.From)), mdEsc(graph.ShortName(r.To)), why)
 		}
 	}
 	if len(in.Filter.Omitted.BodyOnly) > 0 {
@@ -540,6 +545,16 @@ func writeLists(b *strings.Builder, in NoteInput) {
 			fmt.Fprintf(b, "- %s\n", mdEsc(w))
 		}
 	}
+}
+
+// renameEvidence says in a reviewer's words why section 8.1 matched a
+// rename; the delta records it as a step name ("fingerprint").
+var renameEvidence = map[string]string{
+	"entrypoint":  "same handler",
+	"package":     "moved with its package",
+	"type":        "moved with its type",
+	"fingerprint": "identical body",
+	"similarity":  "similar body",
 }
 
 func codes(ids []string) string {

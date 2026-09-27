@@ -155,19 +155,23 @@ func TestPageAndRollup(t *testing.T) {
 	rw := RepoWeek{
 		Repo: "acme/svc", ProjectURL: "https://gl/acme/svc", Branch: "main",
 		Start: time.Date(2026, 9, 21, 0, 0, 0, 0, time.UTC), End: time.Date(2026, 9, 28, 0, 0, 0, 0, time.UTC),
-		BaseSHA: "aaaa1111", HeadSHA: "bbbb2222", Delta: d,
+		BaseSHA: "aaaa1111cccc", HeadSHA: "bbbb2222dddd", Delta: d,
 		MRs:         []MergedMR{{IID: 12, Title: "add orders", WebURL: "https://gl/acme/svc/-/merge_requests/12"}},
 		Attribution: map[string][]int{"sym:acme/svc/orders.Create": {12}, "sym:acme/svc/orders.Cancel": {12}},
 		Layout:      RenderResult{Reset: true, Reason: "2 of 6 packages are new", Dot: "digraph structure {}\n", Warning: "graphviz neato not on PATH; wrote dot only, positions not stored"},
 	}
 	page := Page(rw)
-	for _, want := range []string{"## acme/svc", "`main` at week start: `aaaa1111`; at week end: `bbbb2222`", "**Layout reset this week** (2 of 6 packages are new)", "| `acme/svc/orders` | 2 | [!12](https://gl/acme/svc/-/merge_requests/12) |", "| `acme/svc/legacy` | 1 | (no cached MR delta) |", "| `POST /orders` | added | `orders` |", "| import added | `api` → `orders` |", "```dot", "neato not on PATH"} {
+	for _, want := range []string{"## acme/svc", "`main` at week start: [`aaaa1111`](https://gl/acme/svc/-/commit/aaaa1111cccc); at week end: [`bbbb2222`](https://gl/acme/svc/-/commit/bbbb2222dddd)", "- **1 entry point added**\n- **1 package added**\n- **1 import changed**\n- **2 definitions added**\n- **1 definition removed**\n\n", "**Layout reset this week** (2 of 6 packages are new)", "| `acme/svc/orders` | 2 | [!12](https://gl/acme/svc/-/merge_requests/12) |", "| `acme/svc/legacy` | 1 | unknown: no MR recorded it |", "| `POST /orders` | added | `orders` | — |", "| import added | `api` → `orders` |", "```dot", "neato not on PATH"} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page missing %q\n%s", want, page)
 		}
 	}
 	if strings.Contains(page, "GET /x") {
 		t.Error("unchanged entrypoint should not be listed")
+	}
+	// Zero counts are not listed, and nothing says "symbol".
+	if strings.Contains(page, "**0 ") || strings.Contains(strings.ToLower(page), "symbol") {
+		t.Errorf("page lists a zero count or says symbol:\n%s", page)
 	}
 	row := RollupRowFor(rw)
 	if row.EntrypointsChanged != 1 || row.PackagesAdded != 1 || row.ImportEdgesChanged != 1 || row.MRs != 1 || !strings.Contains(row.MRListURL, "merged_after=2026-09-21") {

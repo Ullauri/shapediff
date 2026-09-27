@@ -31,8 +31,8 @@ func Page(rw RepoWeek) string {
 	var b strings.Builder
 	d := rw.Delta
 	fmt.Fprintf(&b, "## %s\n\n", rw.Repo)
-	fmt.Fprintf(&b, "Week %s to %s. `%s` at week start: `%s`; at week end: `%s`.\n\n",
-		rw.Start.UTC().Format("2006-01-02"), rw.End.UTC().Format("2006-01-02"), rw.Branch, rw.BaseSHA, rw.HeadSHA)
+	fmt.Fprintf(&b, "Week %s to %s. `%s` at week start: %s; at week end: %s.\n\n",
+		rw.Start.UTC().Format("2006-01-02"), rw.End.UTC().Format("2006-01-02"), rw.Branch, commitLink(rw.ProjectURL, rw.BaseSHA), commitLink(rw.ProjectURL, rw.HeadSHA))
 	if rw.Layout.Reset {
 		fmt.Fprintf(&b, "**Layout reset this week** (%s).\n\n", rw.Layout.Reason)
 	}
@@ -43,9 +43,7 @@ func Page(rw RepoWeek) string {
 		b.WriteString(rw.Layout.Dot)
 		b.WriteString("```\n\n</details>\n\n")
 	}
-	s := d.Stats
-	fmt.Fprintf(&b, "| Entry points changed | Packages added | Packages removed | Import edges changed | Symbols added | Symbols removed | Signatures changed |\n|---|---|---|---|---|---|---|\n| %d | %d | %d | %d | %d | %d | %d |\n\n",
-		s.EntrypointsAdded+s.EntrypointsRemoved+s.EntrypointsReachChanged, s.PackagesAdded, s.PackagesRemoved, s.ImportsChanged, s.SymbolsAdded, s.SymbolsRemoved, s.SignaturesChanged)
+	writeCounts(&b, d.Stats)
 
 	if len(d.Packages.Added)+len(d.Packages.Removed)+len(d.Packages.ImportsAdded)+len(d.Packages.ImportsRemoved) > 0 {
 		b.WriteString("### Module wiring\n\n| Change | Package |\n|---|---|\n")
@@ -74,7 +72,7 @@ func Page(rw RepoWeek) string {
 				b.WriteString("### Entry points\n\n| Entry point | Status | Reach added | Reach removed |\n|---|---|---|---|\n")
 				wrote = true
 			}
-			fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n", graph.ShortName(ep.ID), ep.Status, shortList(ep.ReachAdded), shortList(ep.ReachRemoved))
+			fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n", graph.ShortName(ep.ID), strings.ReplaceAll(ep.Status, "_", " "), shortList(ep.ReachAdded), shortList(ep.ReachRemoved))
 		}
 		if wrote {
 			b.WriteString("\n")
@@ -86,7 +84,7 @@ func Page(rw RepoWeek) string {
 	if len(rows) == 0 {
 		b.WriteString("No structural change this week.\n\n")
 	} else {
-		b.WriteString("| Package | Symbols changed | Merge requests |\n|---|---|---|\n")
+		b.WriteString("| Package | Definitions changed | Merge requests |\n|---|---|---|\n")
 		for _, r := range rows {
 			fmt.Fprintf(&b, "| `%s` | %d | %s |\n", r.pkg, r.count, r.mrs)
 		}
@@ -111,6 +109,55 @@ func Page(rw RepoWeek) string {
 		b.WriteString("\n</details>\n\n")
 	}
 	return b.String()
+}
+
+// writeCounts is the week's headline: one line per count that is not
+// zero, as the MR note's "What changed" list is. It was a one-row table of
+// seven columns, mostly zeros, that wrapped at page width and had to be
+// read across to find the one number that moved.
+func writeCounts(b *strings.Builder, s delta.Stats) {
+	n := 0
+	for _, c := range []struct {
+		n         int
+		one, many string
+	}{
+		{s.EntrypointsAdded, "entry point added", "entry points added"},
+		{s.EntrypointsRemoved, "entry point removed", "entry points removed"},
+		{s.EntrypointsReachChanged, "entry point's reach changed", "entry points' reach changed"},
+		{s.PackagesAdded, "package added", "packages added"},
+		{s.PackagesRemoved, "package removed", "packages removed"},
+		{s.ImportsChanged, "import changed", "imports changed"},
+		{s.SymbolsAdded, "definition added", "definitions added"},
+		{s.SymbolsRemoved, "definition removed", "definitions removed"},
+		{s.SignaturesChanged, "signature changed", "signatures changed"},
+	} {
+		if c.n == 0 {
+			continue
+		}
+		word := c.many
+		if c.n == 1 {
+			word = c.one
+		}
+		fmt.Fprintf(b, "- **%d %s**\n", c.n, word)
+		n++
+	}
+	if n > 0 {
+		b.WriteString("\n")
+	}
+}
+
+// commitLink is a short SHA linked to its commit, or the short SHA alone
+// without a project URL. A full SHA was forty characters of noise, and
+// the reader who wants it wants the commit page.
+func commitLink(projectURL, sha string) string {
+	short := sha
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	if projectURL == "" || sha == "" {
+		return "`" + short + "`"
+	}
+	return fmt.Sprintf("[`%s`](%s/-/commit/%s)", short, strings.TrimRight(projectURL, "/"), sha)
 }
 
 type attrRow struct {
@@ -166,7 +213,9 @@ func attributionRows(rw RepoWeek) []attrRow {
 		}
 		mrs := strings.Join(parts, ", ")
 		if mrs == "" {
-			mrs = "(no cached MR delta)"
+			// The MR's own job left no delta to attribute by: it did not
+			// run, or ran before the cache existed.
+			mrs = "unknown: no MR recorded it"
 		}
 		rows = append(rows, attrRow{pkg: pkg, count: n, mrs: mrs})
 	}
@@ -191,7 +240,7 @@ func packageOfID(id string) string {
 
 func shortList(ids []string) string {
 	if len(ids) == 0 {
-		return ""
+		return "—"
 	}
 	parts := make([]string, len(ids))
 	for i, id := range ids {

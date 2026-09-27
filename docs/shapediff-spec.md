@@ -1818,3 +1818,12 @@ had not reached another. Fixes only; no new command, section or chrome.
   possible targets". The remainder diagram of step 4e is titled "not
   reached from any entry point", two words as the rest of the note writes
   it.
+- **The weekly page reads down, as the note does** (section 14.2). Each
+  repo's headline was a one-row table of seven columns, mostly zeros,
+  that wrapped at page width: the defect the third pass above removed
+  from the note. It is now a list of the counts that are not zero. The
+  week's SHAs were printed in full and unlinked; they are short and link
+  to their commits. "Symbols changed", `reach_changed` and "(no cached
+  MR delta)" are "Definitions changed", "reach changed" and "unknown: no
+  MR recorded it", and an empty reach cell is "—". The cross-repo roll-up
+  stays a table, because it is read down a column to compare repos.

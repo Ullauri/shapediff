@@ -519,7 +519,7 @@ func writeLists(b *strings.Builder, in NoteInput) {
 		}
 	}
 	if len(in.Filter.Omitted.WideReach) > 0 {
-		b.WriteString("\n**Wide-reach changes** (through dispatch sites with more targets than the narrow limit; listed, not drawn)\n\n")
+		b.WriteString("\n**Wide-reach changes** (reached only through a call with many possible targets, such as an interface with many implementations; listed, not drawn)\n\n")
 		for _, w := range in.Filter.Omitted.WideReach {
 			if len(w.Added) > 0 {
 				fmt.Fprintf(b, "- `%s` now reaches %s\n", mdEsc(graph.ShortName(w.Entrypoint)), codes(w.Added))

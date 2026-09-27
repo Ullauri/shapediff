@@ -127,7 +127,7 @@ flowchart LR
   class na90b54ed added
 ```
 
-Changed code that no entry point reaches narrowly, with what calls it and what it calls:
+Changed code no entry point reaches, except through a call with many possible targets, with what calls it and what it calls:
 
 - 🟩 **new** in `a`: `B`
 
@@ -201,7 +201,7 @@ flowchart LR
 
 - `acme/svc/orders.Service`
 
-**Wide-reach changes** (through dispatch sites with more targets than the narrow limit; listed, not drawn)
+**Wide-reach changes** (reached only through a call with many possible targets, such as an interface with many implementations; listed, not drawn)
 
 - `POST /orders` now reaches `audit`
 

@@ -330,7 +330,7 @@ func TestSplitAndTerminal(t *testing.T) {
 	if len(res.CallPaths) != 3 {
 		t.Fatalf("expected 3 diagrams (2 entrypoints + rest), got %d: %v", len(res.CallPaths), titles(res))
 	}
-	if res.CallPaths[0].Title != "GET /a" || res.CallPaths[2].Title != "not reachable from any entrypoint" {
+	if res.CallPaths[0].Title != "GET /a" || res.CallPaths[2].Title != "not reached from any entry point" {
 		t.Errorf("titles = %v", titles(res))
 	}
 	if !has(&res.CallPaths[2], orphan) {
@@ -820,7 +820,7 @@ func TestSplitTitles(t *testing.T) {
 	for _, p := range b.split(w) {
 		titles = append(titles, p.title)
 	}
-	want := []string{"POST /z", "POST /orders", "not reachable from any entrypoint"}
+	want := []string{"POST /z", "POST /orders", "not reached from any entry point"}
 	if !reflect.DeepEqual(titles, want) {
 		t.Errorf("titles = %q, want %q", titles, want)
 	}

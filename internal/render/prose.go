@@ -319,11 +319,13 @@ func CallPathBlurb(in NoteInput, dg *filter.Diagram) string {
 	case len(eps) > 1:
 		lead = "What " + andList(eps, 0) + " call, down to the changed code:"
 	case changed:
-		lead = "Changed code that no entry point reaches narrowly, with what calls it and what it calls:"
+		// "Narrowly" is section 7.4's word, not a reviewer's: it means
+		// the only paths run through a call with many possible targets.
+		lead = "Changed code no entry point reaches, except through a call with many possible targets, with what calls it and what it calls:"
 	default:
 		// The remainder of a split can hold only context; saying it holds
 		// changed code would be a claim the picture does not make.
-		lead = "No entry point reaches what is drawn here narrowly, and no changed definition is drawn:"
+		lead = "No entry point reaches what is drawn here, except through a call with many possible targets, and no changed definition is drawn:"
 	}
 	// One item per package and status, swatched like the boxes, changes
 	// first: a list the eye can run down, where a paragraph of clauses

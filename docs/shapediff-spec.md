@@ -1811,3 +1811,10 @@ had not reached another. Fixes only; no new command, section or chrome.
   "(probably: similar body)", and "identical body", "same handler",
   "moved with its package" or "moved with its type" for the others,
   matching the summary list's "(probably)".
+- **"Narrowly" and "entrypoint" are gone from the note** (sections 7.4 and
+  9). "Changed code that no entry point reaches narrowly" and "dispatch
+  sites with more targets than the narrow limit" used this spec's words,
+  as "symbol" once did; they now say "except through a call with many
+  possible targets". The remainder diagram of step 4e is titled "not
+  reached from any entry point", two words as the rest of the note writes
+  it.

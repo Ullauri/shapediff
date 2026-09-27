@@ -50,13 +50,32 @@ func init() {
 	register(command{name: "weekly", synopsis: "--repos repos.yml | --repo <dir>  [--week YYYY-MM-DD] [--dry-run] [-o page.md]", short: "the weekly structure brief: per-repo delta, attribution, pinned layout, wiki page (or --repo for one local checkout)", run: runWeekly})
 }
 
+// parseWeek reads --week as a date in the week or as the ISO week the page
+// is titled by ("2026-W39"), and returns a day inside that week.
+func parseWeek(s string) (time.Time, error) {
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, nil
+	}
+	var year, week int
+	if n, err := fmt.Sscanf(strings.ToUpper(s), "%d-W%d", &year, &week); err == nil && n == 2 && week >= 1 && week <= 53 {
+		// January 4th is always in ISO week 1; step back to its Monday.
+		jan4 := time.Date(year, 1, 4, 0, 0, 0, 0, time.UTC)
+		monday := jan4.AddDate(0, 0, -((int(jan4.Weekday()) + 6) % 7))
+		t := monday.AddDate(0, 0, 7*(week-1))
+		if y, w := t.ISOWeek(); y == year && w == week {
+			return t, nil
+		}
+	}
+	return time.Time{}, usagef("--week %q: want a date in the week (2026-09-24) or an ISO week (2026-W39)", s)
+}
+
 func runWeekly(args []string) error {
 	fs := newFlags("weekly")
 	reposFile := fs.String("repos", "repos.yml", "YAML list of repos to cover")
 	repoDir := fs.String("repo", "", "one local checkout to brief on, instead of --repos; implies --dry-run")
 	branch := fs.String("branch", "", "branch to walk with --repo (default: the checkout's current branch)")
 	extractor := fs.String("extractor", "", "external extractor executable (plug-in contract, spec 6.3), with --repo")
-	when := fs.String("week", "", "any date in the week to report (YYYY-MM-DD); default: last week")
+	when := fs.String("week", "", "the week to report: any date in it (YYYY-MM-DD) or its ISO week (YYYY-Www, as in the page title); default: last week")
 	out := fs.String("o", "", "write the page markdown here as well as (or instead of, with --dry-run) the wiki")
 	dryRun := fs.Bool("dry-run", false, "do not publish; print the page")
 	if err := parseFlags(fs, args); err != nil {
@@ -74,9 +93,9 @@ func runWeekly(args []string) error {
 	}
 	ref := time.Now().UTC().AddDate(0, 0, -7)
 	if *when != "" {
-		t, err := time.Parse("2006-01-02", *when)
+		t, err := parseWeek(*when)
 		if err != nil {
-			return fmt.Errorf("--week: %w", err)
+			return err
 		}
 		ref = t
 	}

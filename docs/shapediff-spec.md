@@ -1320,7 +1320,7 @@ it) and exit 0. The job must never block a pipeline.
 
 The brief also runs against one local checkout, with no repos file, no
 GitLab and no wiki: `shapediff weekly --repo <dir> [--extractor <exe>]
-[--branch <name>] [--week YYYY-MM-DD]` prints the same markdown. That is the
+[--branch <name>] [--week YYYY-MM-DD|YYYY-Www]` prints the same markdown. That is the
 form the catching-up reader of section 2 can run for themselves, and it
 takes the plug-in extractor of section 6.3, so it is not limited to Go. It
 uses a fresh cache directory per run: the cache key of section 14.1 covers

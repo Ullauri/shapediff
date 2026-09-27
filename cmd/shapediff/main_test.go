@@ -79,3 +79,24 @@ func TestUsageErrorsSayHowToFixThem(t *testing.T) {
 		}
 	}
 }
+
+func TestParseWeekTakesTheTitlesForm(t *testing.T) {
+	for in, want := range map[string]string{
+		"2026-09-24": "2026-09-24",
+		"2026-W39":   "2026-09-21", // the Monday of the week titled Week-2026-39
+		"2026-w01":   "2025-12-29", // ISO week 1 can start in the year before
+		"2025-W53":   "",           // 2025 has 52 ISO weeks
+		"last week":  "",
+	} {
+		got, err := parseWeek(in)
+		if want == "" {
+			if err == nil || !strings.Contains(err.Error(), "2026-W39") {
+				t.Errorf("%s: want a usage error naming both forms, got %v %v", in, got, err)
+			}
+			continue
+		}
+		if err != nil || got.Format("2006-01-02") != want {
+			t.Errorf("%s: got %v %v, want %s", in, got, err, want)
+		}
+	}
+}

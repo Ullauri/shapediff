@@ -164,7 +164,7 @@ func TestNoteGolden(t *testing.T) {
 	in := NoteInput{Delta: d, Filter: res, Baseline: bl,
 		Summary: []SummaryItem{{Text: "**1 endpoint's reach changed**", Items: []string{"`POST /orders` now also reaches `orders` (db sink)"}},
 			{Text: "**1 signature changed**, 3 callers in all", Items: []string{"`(*Service).Create` in `orders`, 3 callers"}}},
-		Unchanged: "No endpoint was added.", Suppression: "head does not compile: `acme/svc/broken` (2 changes hidden)",
+		Unchanged: "No endpoint was added.", Suppression: "**Head does not compile:** `acme/svc/broken` (2 changes hidden)",
 		ProjectURL: "https://gitlab.example.com/acme/svc/", HeadSHA: d.HeadSHA, BaseSHA: d.BaseSHA, MRIID: 7,
 		Extractor: graph.Extractor{Name: "go-xtools", Version: "0.1.0", Precision: "typed", Toolchain: "go1.26.0", BuilderMode: &mode}, Elapsed: 1234 * time.Millisecond}
 	got, err := Note(in)
@@ -174,7 +174,7 @@ func TestNoteGolden(t *testing.T) {
 	if !strings.HasPrefix(got, Marker+"\n") {
 		t.Error("marker must be the first line")
 	}
-	order := []string{"#### What changed\n", "head does not compile",
+	order := []string{"#### What changed\n", "**Head does not compile:**",
 		"- **1 endpoint's reach changed**\n  - `POST /orders` now also reaches `orders` (db sink)\n- **1 signature changed**, 3 callers in all\n  - `(*Service).Create` in `orders`, 3 callers\n",
 		"\nNo endpoint was added.\n", "#### Where this lands",
 		"At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external module not drawn). This MR changes code in 1 of them and adds 1 new package.",

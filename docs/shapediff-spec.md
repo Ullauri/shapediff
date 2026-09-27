@@ -663,8 +663,9 @@ output section 3 forbids. So:
   A node with no package (a sink) is suppressed when every edge touching
   it comes from a suppressed package; an entrypoint is under its
   registration site's package (section 6.1).
-- The note says so in one line at its top: "head does not compile:
-  `internal/orders` (14 changes hidden)". Not a generic extraction failure,
+- The note says so in one line at its top: "**Head does not compile:**
+  `internal/orders` (14 changes hidden)", or "Base does not compile" when
+  it is the base that failed. Not a generic extraction failure,
   because reviewers will learn to ignore a generic one.
 - Reachability is computed only over packages `ok` in both graphs; an
   entrypoint whose handler is under a suppressed package is reported
@@ -1788,3 +1789,8 @@ had not reached another. Fixes only; no new command, section or chrome.
   per-MR job has no attachment path yet. Until it does, the note says the
   diagram is not drawn and points at the list under it and the Details
   table, which name and link everything the diagram would have shown.
+- **The suppression line names the side that failed** (section 8.4). It
+  said "head does not compile" for every suppressed package, though a
+  package is suppressed when either graph fails to load it, and a base
+  that does not compile is not the author's to fix. Its lead is bold, like
+  the counts under it, so it is not read as the first sentence of prose.

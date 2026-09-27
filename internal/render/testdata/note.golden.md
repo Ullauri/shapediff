@@ -1,7 +1,7 @@
 <!-- shapediff:v1 -->
 #### What changed
 
-head does not compile: `acme/svc/broken` (2 changes hidden)
+**Head does not compile:** `acme/svc/broken` (2 changes hidden)
 
 - **1 endpoint's reach changed**
   - `POST /orders` now also reaches `orders` (db sink)

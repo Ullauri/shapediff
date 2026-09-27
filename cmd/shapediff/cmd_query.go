@@ -28,7 +28,7 @@ func runQuery(args []string) error {
 		return err
 	}
 	if *graphPath == "" || *symbols == "" {
-		return fmt.Errorf("--graph and --symbols are required")
+		return usagef("--graph and --symbols are required")
 	}
 	doc, err := graph.ReadFile(*graphPath)
 	if err != nil {

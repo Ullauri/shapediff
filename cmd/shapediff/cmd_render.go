@@ -88,7 +88,7 @@ func runRender(args []string) error {
 		return err
 	}
 	if *deltaPath == "" || *headPath == "" || *basePath == "" {
-		return fmt.Errorf("--delta, --head and --base are required")
+		return usagef("--delta, --head and --base are required")
 	}
 	started := time.Now()
 	d, err := delta.ReadFile(*deltaPath)

@@ -57,3 +57,25 @@ func TestEveryCommandHasASynopsis(t *testing.T) {
 		}
 	}
 }
+
+func TestUsageErrorsSayHowToFixThem(t *testing.T) {
+	code, out, errOut := capture(t, "render", "--delta", "d.json")
+	if code != 2 || out != "" || errOut != "shapediff render: --delta, --head and --base are required\nRun 'shapediff render -h' for its flags.\n" {
+		t.Errorf("missing flags: exit %d\n%s", code, errOut)
+	}
+	code, _, errOut = capture(t, "delta", "--nope")
+	if code != 2 || errOut != "shapediff delta: flag provided but not defined: -nope\nRun 'shapediff delta -h' for its flags.\n" {
+		t.Errorf("unknown flag: exit %d\n%s", code, errOut)
+	}
+	// A failure of the work, not of the invocation, stays exit 1.
+	if code, _, _ := capture(t, "delta", "--base", "/nonexistent/b.json", "--head", "/nonexistent/h.json"); code != 1 {
+		t.Errorf("missing file: exit %d, want 1", code)
+	}
+	for typed, want := range map[string]string{"rendr": "render", "detla": "delta", "week": "weekly", "conf": "conform", "zzz": ""} {
+		code, _, errOut := capture(t, typed)
+		hint := "did you mean"
+		if code != 2 || strings.Contains(errOut, hint) != (want != "") || (want != "" && !strings.Contains(errOut, `did you mean "`+want+`"?`)) {
+			t.Errorf("%s: exit %d\n%s", typed, code, errOut)
+		}
+	}
+}

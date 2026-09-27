@@ -64,11 +64,11 @@ func runWeekly(args []string) error {
 	}
 	if *repoDir == "" {
 		if *branch != "" || *extractor != "" {
-			return fmt.Errorf("--branch and --extractor apply to --repo; the repos file carries them per repo")
+			return usagef("--branch and --extractor apply to --repo; the repos file carries them per repo")
 		}
 	} else {
 		if fsSet(fs, "repos") {
-			return fmt.Errorf("--repo and --repos are alternatives; pass one")
+			return usagef("--repo and --repos are alternatives; pass one")
 		}
 		*dryRun = true // there is no wiki to publish to in local mode
 	}

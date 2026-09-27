@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -27,7 +26,7 @@ func runDelta(args []string) error {
 		return err
 	}
 	if *basePath == "" || *headPath == "" {
-		return fmt.Errorf("--base and --head are required")
+		return usagef("--base and --head are required")
 	}
 	base, err := graph.ReadFile(*basePath)
 	if err != nil {

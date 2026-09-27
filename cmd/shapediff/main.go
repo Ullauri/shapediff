@@ -81,7 +81,8 @@ func newFlags(name string) *flag.FlagSet {
 
 // parseFlags parses a command's flags. Help asked for with -h goes to
 // stdout and ends the command without an error (main exits 0 on
-// flag.ErrHelp), since it is what the user wanted.
+// flag.ErrHelp), since it is what the user wanted. A bad flag is a
+// usageError: one line saying what was wrong, not the whole flag list.
 func parseFlags(fs *flag.FlagSet, args []string) error {
 	var buf bytes.Buffer
 	fs.SetOutput(&buf)
@@ -92,9 +93,60 @@ func parseFlags(fs *flag.FlagSet, args []string) error {
 		return err
 	}
 	if err != nil {
-		os.Stderr.Write(buf.Bytes())
+		return usageError(err.Error())
 	}
-	return err
+	return nil
+}
+
+// usageError is a command run the wrong way: a missing, unknown or
+// conflicting flag. main says how to get the command's help and exits 2,
+// the convention for a usage error, where a failure of the work exits 1.
+type usageError string
+
+func (e usageError) Error() string { return string(e) }
+
+func usagef(format string, a ...any) error { return usageError(fmt.Sprintf(format, a...)) }
+
+// suggest is the command closest to a mistyped one, or "" when none is
+// close: a prefix ("rend"), or within two edits ("rendr", "detla").
+func suggest(name string) string {
+	best, bestD := "", 3
+	for n := range commands {
+		d := editDistance(name, n)
+		if strings.HasPrefix(n, name) && len(name) >= 2 {
+			d = 1
+		}
+		if d < bestD || (d == bestD && n < best) {
+			best, bestD = n, d
+		}
+	}
+	return best
+}
+
+// editDistance is the Damerau-Levenshtein distance restricted to adjacent
+// transpositions, so "detla" is one edit from "delta".
+func editDistance(a, b string) int {
+	d := make([][]int, len(a)+1)
+	for i := range d {
+		d[i] = make([]int, len(b)+1)
+		d[i][0] = i
+	}
+	for j := range d[0] {
+		d[0][j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			d[i][j] = min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+cost)
+			if i > 1 && j > 1 && a[i-1] == b[j-2] && a[i-2] == b[j-1] {
+				d[i][j] = min(d[i][j], d[i-2][j-2]+1)
+			}
+		}
+	}
+	return d[len(a)][len(b)]
 }
 
 func upperFirst(s string) string {
@@ -130,8 +182,11 @@ func run(args []string) int {
 	}
 	c, ok := commands[args[0]]
 	if !ok {
-		fmt.Fprintf(os.Stderr, "shapediff: unknown command %q\n", args[0])
-		usage(os.Stderr)
+		fmt.Fprintf(os.Stderr, "shapediff: unknown command %q", args[0])
+		if s := suggest(args[0]); s != "" {
+			fmt.Fprintf(os.Stderr, "; did you mean %q?", s)
+		}
+		fmt.Fprintln(os.Stderr, "\nRun 'shapediff help' for the list of commands.")
 		return 2
 	}
 	if err := c.run(args[1:]); err != nil {
@@ -139,6 +194,11 @@ func run(args []string) int {
 			return 0
 		}
 		fmt.Fprintf(os.Stderr, "shapediff %s: %v\n", c.name, err)
+		var ue usageError
+		if errors.As(err, &ue) {
+			fmt.Fprintf(os.Stderr, "Run 'shapediff %s -h' for its flags.\n", c.name)
+			return 2
+		}
 		return 1
 	}
 	return 0

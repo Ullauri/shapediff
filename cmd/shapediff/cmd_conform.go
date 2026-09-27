@@ -43,7 +43,7 @@ func runConform(args []string) error {
 		return fmt.Errorf("%d violations", len(probs))
 	}
 	if *fixtures == "" {
-		return fmt.Errorf("--check <graph.json> or --fixtures <dir> is required")
+		return usagef("--check <graph.json> or --fixtures <dir> is required")
 	}
 	dir, err := filepath.Abs(*fixtures)
 	if err != nil {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,18 +15,18 @@ import (
 )
 
 func init() {
-	register(command{name: "extract", short: "extract the graph of a checkout (schema v1 on stdout or -o)", run: runExtract})
+	register(command{name: "extract", synopsis: "[--repo .] [--config .shapediff.yml] [--sha] [--repo-slug] [--extractor <exe>] [-o graph.json]", short: "extract the graph of a checkout (schema v1 on stdout or -o)", run: runExtract})
 }
 
 func runExtract(args []string) error {
-	fs := flag.NewFlagSet("extract", flag.ContinueOnError)
+	fs := newFlags("extract")
 	repo := fs.String("repo", ".", "checkout root")
 	cfgPath := fs.String("config", "", "config path (default <repo>/.shapediff.yml)")
 	sha := fs.String("sha", "", "commit sha to record (default: git rev-parse HEAD)")
 	slug := fs.String("repo-slug", "", "repo id to record (default: from the git remote, else the directory name)")
 	extractor := fs.String("extractor", "", "external extractor executable (plug-in contract, spec 6.3); default is the built-in Go extractor")
 	out := fs.String("o", "", "output file (default stdout)")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	repoDir, err := filepath.Abs(*repo)

@@ -17,7 +17,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,13 +26,13 @@ import (
 )
 
 func init() {
-	register(command{name: "post", short: "run the per-MR CI job: extract, delta, render, post the MR note", run: runPost})
+	register(command{name: "post", synopsis: "[--dry-run]    (reads the GitLab CI merge-request environment)", short: "run the per-MR CI job: extract, delta, render, post the MR note", run: runPost})
 }
 
 func runPost(args []string) error {
-	fs := flag.NewFlagSet("post", flag.ContinueOnError)
+	fs := newFlags("post")
 	dryRun := fs.Bool("dry-run", false, "do everything except talk to the GitLab notes API")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	env := pipeline.EnvFrom(os.Getenv)

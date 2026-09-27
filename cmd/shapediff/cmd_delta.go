@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,18 +12,18 @@ import (
 )
 
 func init() {
-	register(command{name: "delta", short: "subtract a base graph from a head graph", run: runDelta})
+	register(command{name: "delta", synopsis: "--base base.json --head head.json [--repo .] [--mr-iid N] [-o delta.json]", short: "subtract a base graph from a head graph", run: runDelta})
 }
 
 func runDelta(args []string) error {
-	fs := flag.NewFlagSet("delta", flag.ContinueOnError)
+	fs := newFlags("delta")
 	basePath := fs.String("base", "", "base graph (required)")
 	headPath := fs.String("head", "", "head graph (required)")
 	repoDir := fs.String("repo", "", "checkout for git rename detection (optional)")
 	cfgPath := fs.String("config", "", "repo config for narrow_targets (optional)")
 	mrIID := fs.Int("mr-iid", 0, "merge request iid to record")
 	out := fs.String("o", "", "output file (default stdout)")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if *basePath == "" || *headPath == "" {

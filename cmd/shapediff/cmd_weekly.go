@@ -47,11 +47,11 @@ import (
 )
 
 func init() {
-	register(command{name: "weekly", short: "the weekly structure brief: per-repo delta, attribution, pinned layout, wiki page (or --repo for one local checkout)", run: runWeekly})
+	register(command{name: "weekly", synopsis: "--repos repos.yml | --repo <dir>  [--week YYYY-MM-DD] [--dry-run] [-o page.md]", short: "the weekly structure brief: per-repo delta, attribution, pinned layout, wiki page (or --repo for one local checkout)", run: runWeekly})
 }
 
 func runWeekly(args []string) error {
-	fs := flag.NewFlagSet("weekly", flag.ContinueOnError)
+	fs := newFlags("weekly")
 	reposFile := fs.String("repos", "repos.yml", "YAML list of repos to cover")
 	repoDir := fs.String("repo", "", "one local checkout to brief on, instead of --repos; implies --dry-run")
 	branch := fs.String("branch", "", "branch to walk with --repo (default: the checkout's current branch)")
@@ -59,7 +59,7 @@ func runWeekly(args []string) error {
 	when := fs.String("week", "", "any date in the week to report (YYYY-MM-DD); default: last week")
 	out := fs.String("o", "", "write the page markdown here as well as (or instead of, with --dry-run) the wiki")
 	dryRun := fs.Bool("dry-run", false, "do not publish; print the page")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if *repoDir == "" {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"sort"
@@ -15,17 +14,17 @@ import (
 )
 
 func init() {
-	register(command{name: "query", short: "query a base graph for named symbols: callers, reach, entry points (spec phase 7)", run: runQuery})
+	register(command{name: "query", synopsis: "--graph base.json --symbols Create,(*Service).Get [-o query.md]", short: "query a base graph for named symbols: callers, reach, entry points (spec phase 7)", run: runQuery})
 }
 
 func runQuery(args []string) error {
-	fs := flag.NewFlagSet("query", flag.ContinueOnError)
+	fs := newFlags("query")
 	graphPath := fs.String("graph", "", "graph document to query (required)")
 	symbols := fs.String("symbols", "", "comma-separated symbol IDs or short names (required)")
 	cfgPath := fs.String("config", "", "repo config for budgets (optional)")
 	projectURL := fs.String("project-url", "", "project web URL for permalinks")
 	out := fs.String("o", "", "output file (default stdout)")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if *graphPath == "" || *symbols == "" {

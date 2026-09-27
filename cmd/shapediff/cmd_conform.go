@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,17 +14,17 @@ import (
 )
 
 func init() {
-	register(command{name: "conform", short: "check a graph document, or drive an extractor over the fixture scenarios", run: runConform})
+	register(command{name: "conform", synopsis: "--check graph.json | --fixtures conformance/go [--extractor <exe>] [--only a,b]", short: "check a graph document, or drive an extractor over the fixture scenarios", run: runConform})
 }
 
 func runConform(args []string) error {
-	fs := flag.NewFlagSet("conform", flag.ContinueOnError)
+	fs := newFlags("conform")
 	check := fs.String("check", "", "graph document to check against the section 6.3 invariants")
 	fixtures := fs.String("fixtures", "", "fixture directory (conformance/<language>) to run the scenarios in")
 	extractor := fs.String("extractor", "", "external extractor executable; default is the built-in Go extractor")
 	only := fs.String("only", "", "comma-separated scenario names to run")
 	narrow := fs.Int("narrow-targets", 2, "k for reachability")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if *check != "" {
@@ -44,7 +43,7 @@ func runConform(args []string) error {
 		return fmt.Errorf("%d violations", len(probs))
 	}
 	if *fixtures == "" {
-		return fmt.Errorf("--check <graph.json> or --fixtures <dir> is required")
+		return usagef("--check <graph.json> or --fixtures <dir> is required")
 	}
 	dir, err := filepath.Abs(*fixtures)
 	if err != nil {

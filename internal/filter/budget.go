@@ -228,7 +228,7 @@ func (b *builder) split(w *work) []*work {
 		}
 	}
 	if len(rest) > 0 {
-		parts = append(parts, w.subset("not reachable from any entrypoint", rest))
+		parts = append(parts, w.subset("not reached from any entry point", rest))
 	}
 	if len(parts) < 2 {
 		return []*work{w}

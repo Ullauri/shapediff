@@ -40,8 +40,9 @@ type NoteInput struct {
 	Extractor graph.Extractor
 	Elapsed   time.Duration
 	// FallbackText is shown in place of a diagram that fell back to SVG,
-	// e.g. a link to the uploaded attachment; when empty a generic line is
-	// printed.
+	// e.g. a link to the uploaded attachment; when empty a line says the
+	// diagram is not drawn and where its content is instead. Nothing
+	// uploads the SVG yet, so the generic line must not promise one.
 	FallbackText string
 }
 
@@ -115,7 +116,7 @@ func Note(in NoteInput) (string, error) {
 			if in.FallbackText != "" {
 				b.WriteString(in.FallbackText + "\n")
 			} else {
-				b.WriteString("The call-path diagram exceeds the Mermaid size limit for this instance; see the attached SVG.\n")
+				b.WriteString("The call-path diagram is over this instance's Mermaid size limit, so it is not drawn. The list below names what it would show, and the Details table links each definition to its line.\n")
 			}
 		} else {
 			fence(&b, Mermaid(&primary))
@@ -137,7 +138,7 @@ func Note(in NoteInput) (string, error) {
 		b.WriteString("\n#### Module wiring\n\n")
 		fence(&b, Mermaid(in.Filter.Wiring))
 	}
-	b.WriteString("\n<details><summary>Details</summary>\n\n")
+	fmt.Fprintf(&b, "\n<details><summary>%s</summary>\n\n", detailsSummary(in))
 	writeNodeTable(&b, in)
 	writeLists(&b, in)
 	fmt.Fprintf(&b, "\nextractor %s %s (%s, %s), base %s, head %s, %s\n", in.Extractor.Name, in.Extractor.Version, in.Extractor.Precision, in.Extractor.Toolchain, short(in.BaseSHA), short(in.HeadSHA), in.Elapsed.Round(time.Millisecond))
@@ -367,7 +368,37 @@ func fence(b *strings.Builder, src string) {
 	b.WriteString("```\n")
 }
 
-func writeNodeTable(b *strings.Builder, in NoteInput) {
+// detailsSummary is the label of the collapsed Details section: what is
+// inside and how much, so a reviewer can tell whether to open it. A bare
+// "Details" hid a medium-confidence rename and the extractor's warnings
+// behind the same word as a table of links.
+func detailsSummary(in NoteInput) string {
+	om := in.Filter.Omitted
+	var parts []string
+	for _, c := range []struct {
+		n         int
+		one, many string
+	}{
+		{len(nodeRows(in)), "node", "nodes"}, // the table's own word; not every row is a definition
+		{len(in.Delta.Nodes.Renamed), "rename", "renames"},
+		{len(om.BodyOnly), "body-only change", "body-only changes"},
+		{len(om.WideReach), "wide-reach change", "wide-reach changes"},
+		{len(in.Delta.Suppressed), "suppressed package", "suppressed packages"},
+		{len(in.Delta.Warnings), "warning", "warnings"},
+	} {
+		if c.n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", c.n, plural(c.n, c.one, c.many)))
+		}
+	}
+	if len(parts) == 0 {
+		return "Details"
+	}
+	return "Details: " + strings.Join(parts, ", ")
+}
+
+// nodeRows are the details table's rows: every definition a call-path
+// diagram draws, and those pruned from it, in ID order.
+func nodeRows(in NoteInput) []filter.Node {
 	seen := map[string]bool{}
 	var rows []filter.Node
 	for _, dg := range in.Filter.CallPaths {
@@ -389,6 +420,11 @@ func writeNodeTable(b *strings.Builder, in NoteInput) {
 		rows = append(rows, n)
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	return rows
+}
+
+func writeNodeTable(b *strings.Builder, in NoteInput) {
+	rows := nodeRows(in)
 	if len(rows) == 0 {
 		return
 	}
@@ -400,8 +436,41 @@ func writeNodeTable(b *strings.Builder, in NoteInput) {
 		if u := permalinkURL(in, n.Status, n.File, n.Line); u != "" {
 			name = "[" + name + "](" + u + ")"
 		}
-		b.WriteString("| " + name + " | " + strings.ReplaceAll(n.Status, "_", " ") + " | " + mdEsc(n.Package) + " |\n")
+		b.WriteString("| " + name + " | " + tableStatus(n.Status) + " | " + tablePackage(n) + " |\n")
 	}
+}
+
+// tableStatus is a node's status in the words and swatches of the key.
+// The table said "context" where the key and the call-path lists say
+// "unchanged", so one grey box had two names.
+func tableStatus(status string) string {
+	switch status {
+	case filter.StatusAdded:
+		return "🟩 added"
+	case filter.StatusRemoved:
+		return "🟥 removed"
+	case filter.StatusSignatureChanged:
+		return "🟨 signature changed"
+	case filter.StatusContext:
+		return "⬜ unchanged"
+	}
+	return strings.ReplaceAll(status, "_", " ")
+}
+
+// tablePackage is the package cell. An entry point or a sink has no
+// package, and an empty cell read as missing data; it says what the node
+// is instead, a sink by its kind as the summary list writes it.
+func tablePackage(n filter.Node) string {
+	switch n.Kind {
+	case filter.KindEntrypoint:
+		return "_entry point_"
+	case filter.KindSink:
+		if p := strings.SplitN(n.ID, ":", 3); len(p) == 3 {
+			return "_" + mdEsc(p[1]) + " sink_"
+		}
+		return "_sink_"
+	}
+	return mdEsc(n.Package)
 }
 
 // Permalink returns a markdown link to the node's file at the head SHA (base
@@ -431,11 +500,16 @@ func writeLists(b *strings.Builder, in NoteInput) {
 	if len(d.Nodes.Renamed) > 0 {
 		b.WriteString("\n**Renames**\n\n")
 		for _, r := range d.Nodes.Renamed {
-			q := ""
-			if r.Confidence == "medium" {
-				q = " ?"
+			why := renameEvidence[r.Via]
+			if why == "" {
+				why = "matched by " + r.Via
 			}
-			fmt.Fprintf(b, "- `%s` → `%s`%s (%s)\n", mdEsc(graph.ShortName(r.From)), mdEsc(graph.ShortName(r.To)), q, r.Via)
+			if r.Confidence == "medium" {
+				// The summary list says "(probably)"; a "?" here was a
+				// code the key does not explain.
+				why = "probably: " + why
+			}
+			fmt.Fprintf(b, "- `%s` → `%s` (%s)\n", mdEsc(graph.ShortName(r.From)), mdEsc(graph.ShortName(r.To)), why)
 		}
 	}
 	if len(in.Filter.Omitted.BodyOnly) > 0 {
@@ -445,7 +519,7 @@ func writeLists(b *strings.Builder, in NoteInput) {
 		}
 	}
 	if len(in.Filter.Omitted.WideReach) > 0 {
-		b.WriteString("\n**Wide-reach changes** (through dispatch sites with more targets than the narrow limit; listed, not drawn)\n\n")
+		b.WriteString("\n**Wide-reach changes** (reached only through a call with many possible targets, such as an interface with many implementations; listed, not drawn)\n\n")
 		for _, w := range in.Filter.Omitted.WideReach {
 			if len(w.Added) > 0 {
 				fmt.Fprintf(b, "- `%s` now reaches %s\n", mdEsc(graph.ShortName(w.Entrypoint)), codes(w.Added))
@@ -471,6 +545,16 @@ func writeLists(b *strings.Builder, in NoteInput) {
 			fmt.Fprintf(b, "- %s\n", mdEsc(w))
 		}
 	}
+}
+
+// renameEvidence says in a reviewer's words why section 8.1 matched a
+// rename; the delta records it as a step name ("fingerprint").
+var renameEvidence = map[string]string{
+	"entrypoint":  "same handler",
+	"package":     "moved with its package",
+	"type":        "moved with its type",
+	"fingerprint": "identical body",
+	"similarity":  "similar body",
 }
 
 func codes(ids []string) string {

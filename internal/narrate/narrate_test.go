@@ -68,8 +68,16 @@ func TestUnchanged(t *testing.T) {
 		t.Errorf("nothing is unchanged, got %q", got)
 	}
 	d = fullDelta()
-	if s := SuppressionLine(d); s != "head does not compile: `a/broken` (14 changes hidden)" {
+	if s := SuppressionLine(d); s != "**Head does not compile:** `a/broken` (14 changes hidden)" {
 		t.Errorf("suppression = %q", s)
+	}
+	// A package is suppressed when either side fails to load; the line
+	// must not blame the head for a broken base.
+	d.Suppressed = append(d.Suppressed,
+		delta.Suppressed{Package: "pkg:a/old", Base: "failed", Head: "ok", HiddenAdditions: 1},
+		delta.Suppressed{Package: "pkg:a/both", Base: "partial", Head: "failed", HiddenRemovals: 2})
+	if s, want := SuppressionLine(d), "**Head does not compile:** `a/broken` (14 changes hidden); **Base does not compile:** `a/old` (1 change hidden); **Neither base nor head compiles:** `a/both` (2 changes hidden)"; s != want {
+		t.Errorf("suppression = %q\nwant          %q", s, want)
 	}
 	if SuppressionLine(&delta.Delta{}) != "" {
 		t.Error("no suppression expected")

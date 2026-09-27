@@ -94,17 +94,35 @@ func Unchanged(d *delta.Delta) string {
 }
 
 // SuppressionLine renders section 8.4's headline addendum, or "" when no
-// package was suppressed.
+// package was suppressed. It names the side that does not load: a package
+// is suppressed when either graph failed it, and a base that does not
+// compile is not the MR author's to fix. The lead is bold, like the counts
+// under it, so it reads as a fact about the note and not as prose.
 func SuppressionLine(d *delta.Delta) string {
 	if len(d.Suppressed) == 0 {
 		return ""
 	}
-	var parts []string
+	bad := func(status string) bool { return status == graph.LoadPartial || status == graph.LoadFailed }
+	leads := []string{"Head does not compile", "Base does not compile", "Neither base nor head compiles"}
+	parts := make([][]string, len(leads))
 	for _, s := range d.Suppressed {
+		side := 0
+		switch {
+		case bad(s.Base) && bad(s.Head):
+			side = 2
+		case bad(s.Base):
+			side = 1
+		}
 		hidden := s.HiddenRemovals + s.HiddenAdditions
-		parts = append(parts, fmt.Sprintf("`%s` (%d %s hidden)", strings.TrimPrefix(s.Package, "pkg:"), hidden, plural(hidden, "change", "changes")))
+		parts[side] = append(parts[side], fmt.Sprintf("`%s` (%d %s hidden)", strings.TrimPrefix(s.Package, "pkg:"), hidden, plural(hidden, "change", "changes")))
 	}
-	return "head does not compile: " + strings.Join(parts, ", ")
+	var out []string
+	for i, p := range parts {
+		if len(p) > 0 {
+			out = append(out, "**"+leads[i]+":** "+strings.Join(p, ", "))
+		}
+	}
+	return strings.Join(out, "; ")
 }
 
 // Template renders the narration from the delta alone, in the section 11

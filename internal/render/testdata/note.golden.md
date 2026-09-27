@@ -1,7 +1,7 @@
 <!-- shapediff:v1 -->
 #### What changed
 
-head does not compile: `acme/svc/broken` (2 changes hidden)
+**Head does not compile:** `acme/svc/broken` (2 changes hidden)
 
 - **1 endpoint's reach changed**
   - `POST /orders` now also reaches `orders` (db sink)
@@ -127,7 +127,7 @@ flowchart LR
   class na90b54ed added
 ```
 
-Changed code that no entry point reaches narrowly, with what calls it and what it calls:
+Changed code no entry point reaches, except through a call with many possible targets, with what calls it and what it calls:
 
 - 🟩 **new** in `a`: `B`
 
@@ -181,27 +181,27 @@ flowchart LR
   class n7309427a context
 ```
 
-<details><summary>Details</summary>
+<details><summary>Details: 7 nodes, 1 rename, 1 body-only change, 1 wide-reach change, 1 suppressed package, 1 warning</summary>
 
 | node | status | package |
 |---|---|---|
-| `POST /orders` | context |  |
-| `orders` | context |  |
-| `B` | added | a |
-| [`(*Service).Create* (+3 callers)`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/s.go#L12) | signature changed | acme/svc/orders |
-| [`Handler`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/h.go#L3) | context | acme/svc/orders |
-| [`Validate`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7) | added | acme/svc/orders |
-| [`Old`](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1) | removed | acme/svc/util |
+| `POST /orders` | ⬜ unchanged | _entry point_ |
+| `orders` | ⬜ unchanged | _db sink_ |
+| `B` | 🟩 added | a |
+| [`(*Service).Create* (+3 callers)`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/s.go#L12) | 🟨 signature changed | acme/svc/orders |
+| [`Handler`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/h.go#L3) | ⬜ unchanged | acme/svc/orders |
+| [`Validate`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7) | 🟩 added | acme/svc/orders |
+| [`Old`](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1) | 🟥 removed | acme/svc/util |
 
 **Renames**
 
-- `Old` → `Older` ? (similarity)
+- `Old` → `Older` (probably: similar body)
 
 **Body-only changes**
 
 - `acme/svc/orders.Service`
 
-**Wide-reach changes** (through dispatch sites with more targets than the narrow limit; listed, not drawn)
+**Wide-reach changes** (reached only through a call with many possible targets, such as an interface with many implementations; listed, not drawn)
 
 - `POST /orders` now reaches `audit`
 

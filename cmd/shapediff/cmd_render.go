@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -17,7 +16,7 @@ import (
 )
 
 func init() {
-	register(command{name: "render", short: "render a delta as an MR note (Mermaid + narration)", run: runRender})
+	register(command{name: "render", synopsis: "--delta delta.json --head head.json --base base.json [--project-url URL] [--diagram-only] [-o note.md]", short: "render a delta as an MR note (Mermaid + narration)", run: runRender})
 }
 
 // renderNote is the shared path from delta and graphs to note text. It is
@@ -75,7 +74,7 @@ func renderNote(d *delta.Delta, head, base *graph.Index, cfg *config.Config, pro
 }
 
 func runRender(args []string) error {
-	fs := flag.NewFlagSet("render", flag.ContinueOnError)
+	fs := newFlags("render")
 	deltaPath := fs.String("delta", "", "delta document (required)")
 	headPath := fs.String("head", "", "head graph (required)")
 	basePath := fs.String("base", "", "base graph (required)")
@@ -85,11 +84,11 @@ func runRender(args []string) error {
 	mrIID := fs.Int("mr-iid", 0, "merge request iid to record in the note")
 	out := fs.String("o", "", "output file (default stdout)")
 	diagramOnly := fs.Bool("diagram-only", false, "print only the primary call-path Mermaid source")
-	if err := fs.Parse(args); err != nil {
+	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if *deltaPath == "" || *headPath == "" || *basePath == "" {
-		return fmt.Errorf("--delta, --head and --base are required")
+		return usagef("--delta, --head and --base are required")
 	}
 	started := time.Now()
 	d, err := delta.ReadFile(*deltaPath)
@@ -142,7 +141,7 @@ func runRender(args []string) error {
 		fmt.Fprintln(os.Stderr, "shapediff render:", wmsg)
 	}
 	if res.Fallback {
-		fmt.Fprintln(os.Stderr, "shapediff render: primary diagram over budget; render the SVG fallback with graphviz (see render.SVG)")
+		fmt.Fprintln(os.Stderr, "shapediff render: the call-path diagram is over budget.chars, so the note lists it instead of drawing it; --diagram-only prints its Mermaid source")
 	}
 	_, err = io.WriteString(w, note)
 	return err

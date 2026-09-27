@@ -164,7 +164,7 @@ func TestNoteGolden(t *testing.T) {
 	in := NoteInput{Delta: d, Filter: res, Baseline: bl,
 		Summary: []SummaryItem{{Text: "**1 endpoint's reach changed**", Items: []string{"`POST /orders` now also reaches `orders` (db sink)"}},
 			{Text: "**1 signature changed**, 3 callers in all", Items: []string{"`(*Service).Create` in `orders`, 3 callers"}}},
-		Unchanged: "No endpoint was added.", Suppression: "head does not compile: `acme/svc/broken` (2 changes hidden)",
+		Unchanged: "No endpoint was added.", Suppression: "**Head does not compile:** `acme/svc/broken` (2 changes hidden)",
 		ProjectURL: "https://gitlab.example.com/acme/svc/", HeadSHA: d.HeadSHA, BaseSHA: d.BaseSHA, MRIID: 7,
 		Extractor: graph.Extractor{Name: "go-xtools", Version: "0.1.0", Precision: "typed", Toolchain: "go1.26.0", BuilderMode: &mode}, Elapsed: 1234 * time.Millisecond}
 	got, err := Note(in)
@@ -174,14 +174,14 @@ func TestNoteGolden(t *testing.T) {
 	if !strings.HasPrefix(got, Marker+"\n") {
 		t.Error("marker must be the first line")
 	}
-	order := []string{"#### What changed\n", "head does not compile",
+	order := []string{"#### What changed\n", "**Head does not compile:**",
 		"- **1 endpoint's reach changed**\n  - `POST /orders` now also reaches `orders` (db sink)\n- **1 signature changed**, 3 callers in all\n  - `(*Service).Create` in `orders`, 3 callers\n",
 		"\nNo endpoint was added.\n", "#### Where this lands",
 		"At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external module not drawn). This MR changes code in 1 of them and adds 1 new package.",
 		"- **[`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders)**: 7 functions, 3 methods and 2 types\n  - 1 added: `Validate`\n  - 1 changed signature: `(*Service).Create`\n  - Imported by `api`, `billing`, `cron`, `export`, +1\n  - Reached from `POST /orders` (new)\n  - Talks to `db orders`\n",
 		"- **[`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util)**: new package, 3 functions\n  - Imported by `orders`\n",
 		Key(true, true), "classDef touched", `(["2 http routes"])`, "```\n4 untouched packages folded into their directory to fit.\n", "#### Dataflow", "**POST /orders**", "Existing endpoint whose reach changed, handled by [`Handler.Create`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/api/h.go#L3) in `svc/api`.", "> Creates an order. — `svc/orders.(*Service).Create`", "🟩 **Now also reaches**\n\n- the `orders` table: writes it in [`(*Service).Create`]", "#### Call paths", "What `POST /orders` calls, down to the changed code:\n\n- 🟩 **new** in `orders`: [`Validate`]", "- ⬜ the `orders` table", "<details><summary>1 more call-path diagram", "**GET /x**", "- 🟩 **new** in `a`: `B`",
-		"#### Call stacks", "**`POST /orders`**, reach changed", "<code>&nbsp;&nbsp;Handler.Create</code> svc/api", "<code>~&nbsp;├─&nbsp;(*Service).Create</code> svc/orders · signature changed", "```diff\n- func (*Service) Create()\n+ func (*Service) Create(ctx context.Context)\n```", "Creates an order.", "<code>+&nbsp;│&nbsp;&nbsp;└─&nbsp;writes&nbsp;db&nbsp;orders</code> new write", "<code>&nbsp;&nbsp;└─&nbsp;+2&nbsp;more</code>", "Also calls `log.Info` and `metrics.Inc`.", "#### Module wiring", "<details><summary>Details", "| node | status |", "| [`Validate`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7) | added | acme/svc/orders |", "| [`Old`](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1) | removed | acme/svc/util |", "**Renames**", "`Old` → `Older` ?", "**Body-only changes**", "**Wide-reach changes**", "**Suppressed packages**", "2 nodes hidden by the budget", "**Warnings**", "vta took 41s", "extractor go-xtools 0.1.0 (typed, go1.26.0), base aaaaaaaa, head bbbbbbbb, 1.234s"}
+		"#### Call stacks", "**`POST /orders`**, reach changed", "<code>&nbsp;&nbsp;Handler.Create</code> svc/api", "<code>~&nbsp;├─&nbsp;(*Service).Create</code> svc/orders · signature changed", "```diff\n- func (*Service) Create()\n+ func (*Service) Create(ctx context.Context)\n```", "Creates an order.", "<code>+&nbsp;│&nbsp;&nbsp;└─&nbsp;writes&nbsp;db&nbsp;orders</code> new write", "<code>&nbsp;&nbsp;└─&nbsp;+2&nbsp;more</code>", "Also calls `log.Info` and `metrics.Inc`.", "#### Module wiring", "<details><summary>Details", "| node | status |", "| [`Validate`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7) | 🟩 added | acme/svc/orders |", "| [`Old`](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1) | 🟥 removed | acme/svc/util |", "**Renames**", "`Old` → `Older` (probably: similar body)", "**Body-only changes**", "**Wide-reach changes**", "**Suppressed packages**", "2 nodes hidden by the budget", "**Warnings**", "vta took 41s", "extractor go-xtools 0.1.0 (typed, go1.26.0), base aaaaaaaa, head bbbbbbbb, 1.234s"}
 	pos := 0
 	for _, o := range order {
 		i := strings.Index(got[pos:], o)
@@ -219,8 +219,17 @@ func TestNoteGolden(t *testing.T) {
 	got, _ = Note(in)
 	// The key still prints, and the collapsed section still holds the second
 	// diagram; it is the primary that must not be embedded.
-	if !strings.Contains(got, "attached SVG") || strings.Contains(got, Mermaid(&res.CallPaths[0])) {
+	if !strings.Contains(got, "so it is not drawn") || strings.Contains(got, Mermaid(&res.CallPaths[0])) {
 		t.Error("fallback note should not embed the primary diagram")
+	}
+	// Nothing uploads the SVG, so the note must not send the reader to one.
+	if strings.Contains(got, "attached SVG") {
+		t.Error("fallback note promises an attachment that is never uploaded")
+	}
+	// The collapsed section says what it holds, so a reviewer can tell
+	// whether a warning or a doubtful rename is behind it.
+	if !strings.Contains(got, "<details><summary>Details: 7 nodes, 1 rename, 1 body-only change, 1 wide-reach change, 1 suppressed package, 1 warning</summary>") {
+		t.Error("details summary should count what it holds")
 	}
 	if NoStructuralNote("bbbbbbbbbbbb") != Marker+"\nno structural change at bbbbbbbb\n" {
 		t.Error("no-structural note")

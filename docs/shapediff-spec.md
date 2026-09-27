@@ -579,7 +579,8 @@ hierarchical, coarse to fine:
    equal after renaming the identifier, and Jaccard similarity estimated
    from `body_sketch` at least 0.67 (equivalent to Dice 0.8), taken as a
    **mutual best match** in both directions: `renamed`, via `similarity`,
-   confidence medium. Shown with a "?" badge.
+   confidence medium. Shown as "probably", in the summary list and in
+   the details list.
 5. Everything else stays added/removed.
 
 Git's own file rename detection (`git diff -M --name-status base..head`)
@@ -663,8 +664,9 @@ output section 3 forbids. So:
   A node with no package (a sink) is suppressed when every edge touching
   it comes from a suppressed package; an entrypoint is under its
   registration site's package (section 6.1).
-- The note says so in one line at its top: "head does not compile:
-  `internal/orders` (14 changes hidden)". Not a generic extraction failure,
+- The note says so in one line at its top: "**Head does not compile:**
+  `internal/orders` (14 changes hidden)", or "Base does not compile" when
+  it is the base that failed. Not a generic extraction failure,
   because reviewers will learn to ignore a generic one.
 - Reachability is computed only over packages `ok` in both graphs; an
   entrypoint whose handler is under a suppressed package is reported
@@ -828,7 +830,9 @@ notes and it needs no image hosting.
   frontend constant on **source characters**, not nodes. Measure it on the
   target instance during the spike, set `S` from it, and confirm that a
   `classDef` preamble plus `B` subgraphed nodes fits. Fallback: render SVG
-  with graphviz `dot` and upload as an MR attachment.
+  with graphviz `dot` and upload as an MR attachment. The upload is not
+  built; until it is, the note says the diagram is not drawn (section 20,
+  UX review).
 
 Weekly: Mermaid cannot keep layout stable across renders, which makes
 week-over-week drift unreadable. Weekly package-level diagrams use
@@ -1318,7 +1322,7 @@ it) and exit 0. The job must never block a pipeline.
 
 The brief also runs against one local checkout, with no repos file, no
 GitLab and no wiki: `shapediff weekly --repo <dir> [--extractor <exe>]
-[--branch <name>] [--week YYYY-MM-DD]` prints the same markdown. That is the
+[--branch <name>] [--week YYYY-MM-DD|YYYY-Www]` prints the same markdown. That is the
 form the catching-up reader of section 2 can run for themselves, and it
 takes the plug-in extractor of section 6.3, so it is not limited to Go. It
 uses a fresh cache directory per run: the cache key of section 14.1 covers
@@ -1774,3 +1778,52 @@ across went down the page:
   package, naming what was added, removed, renamed or changed there rather
   than counting it. The six columns wrapped to a word a line at note width,
   and "3 added, 1 changed" did not say what was added.
+
+### Added after v0.5 (UX review, 2026-09-26)
+
+A review of every surface a person meets (the CLI, the MR note, the weekly
+page) for places where a principle this spec already states for one surface
+had not reached another. Fixes only; no new command, section or chrome.
+
+- **The call-path fallback does not promise an attachment** (section 10).
+  The note said "see the attached SVG", and nothing uploads one: the
+  per-MR job has no attachment path yet. Until it does, the note says the
+  diagram is not drawn and points at the list under it and the Details
+  table, which name and link everything the diagram would have shown.
+- **The suppression line names the side that failed** (section 8.4). It
+  said "head does not compile" for every suppressed package, though a
+  package is suppressed when either graph fails to load it, and a base
+  that does not compile is not the author's to fix. Its lead is bold, like
+  the counts under it, so it is not read as the first sentence of prose.
+- **The Details summary says what it holds** (section 14.1): "Details: 7
+  nodes, 1 rename, 1 warning". A bare "Details" put a medium-confidence
+  rename and the extractor's warnings behind the same word as a table of
+  links, so nothing told a reviewer there was a reason to open it. Only
+  non-zero counts are named, in the order the section prints them.
+- **The details table speaks the key's words** (sections 10 and 14.1). Its
+  status column said `context` where the key and the call-path lists say
+  "unchanged", so one grey box had two names; it now carries the key's
+  words and swatches. An entry point's or a sink's package cell was empty,
+  which read as missing data; it now says "entry point" or "db sink".
+- **A rename says why it was matched, in words** (section 8.1). The
+  details list printed `` `Old` → `New` ? (similarity) ``: a "?" the key
+  does not explain, beside the name of an algorithm step. It now reads
+  "(probably: similar body)", and "identical body", "same handler",
+  "moved with its package" or "moved with its type" for the others,
+  matching the summary list's "(probably)".
+- **"Narrowly" and "entrypoint" are gone from the note** (sections 7.4 and
+  9). "Changed code that no entry point reaches narrowly" and "dispatch
+  sites with more targets than the narrow limit" used this spec's words,
+  as "symbol" once did; they now say "except through a call with many
+  possible targets". The remainder diagram of step 4e is titled "not
+  reached from any entry point", two words as the rest of the note writes
+  it.
+- **The weekly page reads down, as the note does** (section 14.2). Each
+  repo's headline was a one-row table of seven columns, mostly zeros,
+  that wrapped at page width: the defect the third pass above removed
+  from the note. It is now a list of the counts that are not zero. The
+  week's SHAs were printed in full and unlinked; they are short and link
+  to their commits. "Symbols changed", `reach_changed` and "(no cached
+  MR delta)" are "Definitions changed", "reach changed" and "unknown: no
+  MR recorded it", and an empty reach cell is "—". The cross-repo roll-up
+  stays a table, because it is read down a column to compare repos.

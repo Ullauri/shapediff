@@ -43,9 +43,10 @@ shapediff extract  --repo . [--config .shapediff.yml] [--sha] [--repo-slug] [--e
 shapediff delta    --base base.json --head head.json [--repo .] [--mr-iid N] -o delta.json
 shapediff render   --delta delta.json --head head.json --base base.json [--project-url URL] [--diagram-only] -o note.md
 shapediff post     [--dry-run]            # the whole per-MR job from CI variables (spec 14.1)
-shapediff weekly   --repos repos.yml [--dry-run] [--week YYYY-Www]   # spec 14.2
+shapediff weekly   --repos repos.yml | --repo <dir> [--dry-run] [--week YYYY-MM-DD|YYYY-Www]   # spec 14.2
 shapediff query    --graph base.json --symbols Create,(*Service).Get  # spec 18, decision 5
 shapediff conform  --check graph.json | --fixtures conformance/go [--extractor "<exe>"] [--only a,b]
+shapediff help     [command]              # a command's synopsis and flags; also `<command> -h`
 ```
 
 `extract --extractor <exe>` and `conform --extractor <exe>` run any

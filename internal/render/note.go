@@ -436,8 +436,41 @@ func writeNodeTable(b *strings.Builder, in NoteInput) {
 		if u := permalinkURL(in, n.Status, n.File, n.Line); u != "" {
 			name = "[" + name + "](" + u + ")"
 		}
-		b.WriteString("| " + name + " | " + strings.ReplaceAll(n.Status, "_", " ") + " | " + mdEsc(n.Package) + " |\n")
+		b.WriteString("| " + name + " | " + tableStatus(n.Status) + " | " + tablePackage(n) + " |\n")
 	}
+}
+
+// tableStatus is a node's status in the words and swatches of the key.
+// The table said "context" where the key and the call-path lists say
+// "unchanged", so one grey box had two names.
+func tableStatus(status string) string {
+	switch status {
+	case filter.StatusAdded:
+		return "🟩 added"
+	case filter.StatusRemoved:
+		return "🟥 removed"
+	case filter.StatusSignatureChanged:
+		return "🟨 signature changed"
+	case filter.StatusContext:
+		return "⬜ unchanged"
+	}
+	return strings.ReplaceAll(status, "_", " ")
+}
+
+// tablePackage is the package cell. An entry point or a sink has no
+// package, and an empty cell read as missing data; it says what the node
+// is instead, a sink by its kind as the summary list writes it.
+func tablePackage(n filter.Node) string {
+	switch n.Kind {
+	case filter.KindEntrypoint:
+		return "_entry point_"
+	case filter.KindSink:
+		if p := strings.SplitN(n.ID, ":", 3); len(p) == 3 {
+			return "_" + mdEsc(p[1]) + " sink_"
+		}
+		return "_sink_"
+	}
+	return mdEsc(n.Package)
 }
 
 // Permalink returns a markdown link to the node's file at the head SHA (base

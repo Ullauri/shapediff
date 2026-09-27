@@ -1799,3 +1799,8 @@ had not reached another. Fixes only; no new command, section or chrome.
   rename and the extractor's warnings behind the same word as a table of
   links, so nothing told a reviewer there was a reason to open it. Only
   non-zero counts are named, in the order the section prints them.
+- **The details table speaks the key's words** (sections 10 and 14.1). Its
+  status column said `context` where the key and the call-path lists say
+  "unchanged", so one grey box had two names; it now carries the key's
+  words and swatches. An entry point's or a sink's package cell was empty,
+  which read as missing data; it now says "entry point" or "db sink".

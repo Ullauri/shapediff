@@ -185,13 +185,13 @@ flowchart LR
 
 | node | status | package |
 |---|---|---|
-| `POST /orders` | context |  |
-| `orders` | context |  |
-| `B` | added | a |
-| [`(*Service).Create* (+3 callers)`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/s.go#L12) | signature changed | acme/svc/orders |
-| [`Handler`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/h.go#L3) | context | acme/svc/orders |
-| [`Validate`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7) | added | acme/svc/orders |
-| [`Old`](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1) | removed | acme/svc/util |
+| `POST /orders` | ⬜ unchanged | _entry point_ |
+| `orders` | ⬜ unchanged | _db sink_ |
+| `B` | 🟩 added | a |
+| [`(*Service).Create* (+3 callers)`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/s.go#L12) | 🟨 signature changed | acme/svc/orders |
+| [`Handler`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/h.go#L3) | ⬜ unchanged | acme/svc/orders |
+| [`Validate`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7) | 🟩 added | acme/svc/orders |
+| [`Old`](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1) | 🟥 removed | acme/svc/util |
 
 **Renames**
 

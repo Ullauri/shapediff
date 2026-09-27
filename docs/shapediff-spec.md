@@ -1794,3 +1794,8 @@ had not reached another. Fixes only; no new command, section or chrome.
   package is suppressed when either graph fails to load it, and a base
   that does not compile is not the author's to fix. Its lead is bold, like
   the counts under it, so it is not read as the first sentence of prose.
+- **The Details summary says what it holds** (section 14.1): "Details: 7
+  nodes, 1 rename, 1 warning". A bare "Details" put a medium-confidence
+  rename and the extractor's warnings behind the same word as a table of
+  links, so nothing told a reviewer there was a reason to open it. Only
+  non-zero counts are named, in the order the section prints them.

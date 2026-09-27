@@ -226,6 +226,11 @@ func TestNoteGolden(t *testing.T) {
 	if strings.Contains(got, "attached SVG") {
 		t.Error("fallback note promises an attachment that is never uploaded")
 	}
+	// The collapsed section says what it holds, so a reviewer can tell
+	// whether a warning or a doubtful rename is behind it.
+	if !strings.Contains(got, "<details><summary>Details: 7 nodes, 1 rename, 1 body-only change, 1 wide-reach change, 1 suppressed package, 1 warning</summary>") {
+		t.Error("details summary should count what it holds")
+	}
 	if NoStructuralNote("bbbbbbbbbbbb") != Marker+"\nno structural change at bbbbbbbb\n" {
 		t.Error("no-structural note")
 	}

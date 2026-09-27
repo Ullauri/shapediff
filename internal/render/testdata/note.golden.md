@@ -181,7 +181,7 @@ flowchart LR
   class n7309427a context
 ```
 
-<details><summary>Details</summary>
+<details><summary>Details: 7 nodes, 1 rename, 1 body-only change, 1 wide-reach change, 1 suppressed package, 1 warning</summary>
 
 | node | status | package |
 |---|---|---|

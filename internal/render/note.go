@@ -138,7 +138,7 @@ func Note(in NoteInput) (string, error) {
 		b.WriteString("\n#### Module wiring\n\n")
 		fence(&b, Mermaid(in.Filter.Wiring))
 	}
-	b.WriteString("\n<details><summary>Details</summary>\n\n")
+	fmt.Fprintf(&b, "\n<details><summary>%s</summary>\n\n", detailsSummary(in))
 	writeNodeTable(&b, in)
 	writeLists(&b, in)
 	fmt.Fprintf(&b, "\nextractor %s %s (%s, %s), base %s, head %s, %s\n", in.Extractor.Name, in.Extractor.Version, in.Extractor.Precision, in.Extractor.Toolchain, short(in.BaseSHA), short(in.HeadSHA), in.Elapsed.Round(time.Millisecond))
@@ -368,7 +368,37 @@ func fence(b *strings.Builder, src string) {
 	b.WriteString("```\n")
 }
 
-func writeNodeTable(b *strings.Builder, in NoteInput) {
+// detailsSummary is the label of the collapsed Details section: what is
+// inside and how much, so a reviewer can tell whether to open it. A bare
+// "Details" hid a medium-confidence rename and the extractor's warnings
+// behind the same word as a table of links.
+func detailsSummary(in NoteInput) string {
+	om := in.Filter.Omitted
+	var parts []string
+	for _, c := range []struct {
+		n         int
+		one, many string
+	}{
+		{len(nodeRows(in)), "node", "nodes"}, // the table's own word; not every row is a definition
+		{len(in.Delta.Nodes.Renamed), "rename", "renames"},
+		{len(om.BodyOnly), "body-only change", "body-only changes"},
+		{len(om.WideReach), "wide-reach change", "wide-reach changes"},
+		{len(in.Delta.Suppressed), "suppressed package", "suppressed packages"},
+		{len(in.Delta.Warnings), "warning", "warnings"},
+	} {
+		if c.n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", c.n, plural(c.n, c.one, c.many)))
+		}
+	}
+	if len(parts) == 0 {
+		return "Details"
+	}
+	return "Details: " + strings.Join(parts, ", ")
+}
+
+// nodeRows are the details table's rows: every definition a call-path
+// diagram draws, and those pruned from it, in ID order.
+func nodeRows(in NoteInput) []filter.Node {
 	seen := map[string]bool{}
 	var rows []filter.Node
 	for _, dg := range in.Filter.CallPaths {
@@ -390,6 +420,11 @@ func writeNodeTable(b *strings.Builder, in NoteInput) {
 		rows = append(rows, n)
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	return rows
+}
+
+func writeNodeTable(b *strings.Builder, in NoteInput) {
+	rows := nodeRows(in)
 	if len(rows) == 0 {
 		return
 	}

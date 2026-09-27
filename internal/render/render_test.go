@@ -219,8 +219,12 @@ func TestNoteGolden(t *testing.T) {
 	got, _ = Note(in)
 	// The key still prints, and the collapsed section still holds the second
 	// diagram; it is the primary that must not be embedded.
-	if !strings.Contains(got, "attached SVG") || strings.Contains(got, Mermaid(&res.CallPaths[0])) {
+	if !strings.Contains(got, "so it is not drawn") || strings.Contains(got, Mermaid(&res.CallPaths[0])) {
 		t.Error("fallback note should not embed the primary diagram")
+	}
+	// Nothing uploads the SVG, so the note must not send the reader to one.
+	if strings.Contains(got, "attached SVG") {
+		t.Error("fallback note promises an attachment that is never uploaded")
 	}
 	if NoStructuralNote("bbbbbbbbbbbb") != Marker+"\nno structural change at bbbbbbbb\n" {
 		t.Error("no-structural note")

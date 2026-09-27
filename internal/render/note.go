@@ -40,8 +40,9 @@ type NoteInput struct {
 	Extractor graph.Extractor
 	Elapsed   time.Duration
 	// FallbackText is shown in place of a diagram that fell back to SVG,
-	// e.g. a link to the uploaded attachment; when empty a generic line is
-	// printed.
+	// e.g. a link to the uploaded attachment; when empty a line says the
+	// diagram is not drawn and where its content is instead. Nothing
+	// uploads the SVG yet, so the generic line must not promise one.
 	FallbackText string
 }
 
@@ -115,7 +116,7 @@ func Note(in NoteInput) (string, error) {
 			if in.FallbackText != "" {
 				b.WriteString(in.FallbackText + "\n")
 			} else {
-				b.WriteString("The call-path diagram exceeds the Mermaid size limit for this instance; see the attached SVG.\n")
+				b.WriteString("The call-path diagram is over this instance's Mermaid size limit, so it is not drawn. The list below names what it would show, and the Details table links each definition to its line.\n")
 			}
 		} else {
 			fence(&b, Mermaid(&primary))

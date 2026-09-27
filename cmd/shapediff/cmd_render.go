@@ -141,7 +141,7 @@ func runRender(args []string) error {
 		fmt.Fprintln(os.Stderr, "shapediff render:", wmsg)
 	}
 	if res.Fallback {
-		fmt.Fprintln(os.Stderr, "shapediff render: primary diagram over budget; render the SVG fallback with graphviz (see render.SVG)")
+		fmt.Fprintln(os.Stderr, "shapediff render: the call-path diagram is over budget.chars, so the note lists it instead of drawing it; --diagram-only prints its Mermaid source")
 	}
 	_, err = io.WriteString(w, note)
 	return err

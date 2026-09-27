@@ -828,7 +828,9 @@ notes and it needs no image hosting.
   frontend constant on **source characters**, not nodes. Measure it on the
   target instance during the spike, set `S` from it, and confirm that a
   `classDef` preamble plus `B` subgraphed nodes fits. Fallback: render SVG
-  with graphviz `dot` and upload as an MR attachment.
+  with graphviz `dot` and upload as an MR attachment. The upload is not
+  built; until it is, the note says the diagram is not drawn (section 20,
+  UX review).
 
 Weekly: Mermaid cannot keep layout stable across renders, which makes
 week-over-week drift unreadable. Weekly package-level diagrams use
@@ -1774,3 +1776,15 @@ across went down the page:
   package, naming what was added, removed, renamed or changed there rather
   than counting it. The six columns wrapped to a word a line at note width,
   and "3 added, 1 changed" did not say what was added.
+
+### Added after v0.5 (UX review, 2026-09-26)
+
+A review of every surface a person meets (the CLI, the MR note, the weekly
+page) for places where a principle this spec already states for one surface
+had not reached another. Fixes only; no new command, section or chrome.
+
+- **The call-path fallback does not promise an attachment** (section 10).
+  The note said "see the attached SVG", and nothing uploads one: the
+  per-MR job has no attachment path yet. Until it does, the note says the
+  diagram is not drawn and points at the list under it and the Details
+  table, which name and link everything the diagram would have shown.

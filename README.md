@@ -166,20 +166,29 @@ of the head, `SHAPEDIFF_TOKEN=$(gh auth token)`) and run `shapediff post
   counts that are zero share one line under the list. `narrate.Sentence`
   carries both forms; `cmd_render.go` picks one per sentence.
 - **What it touches (sections 6.1, 14.1).** "What changed" opens with
-  every package the change has code in, under the label the list below it
-  uses, with what the package is for, and only then says what the change
-  did to them: a reader cannot weigh "`_stamp` added in `reading`" without
-  knowing what `reading` is. The description is the package's own first
-  sentence, which both extractors now record on the package node. A
-  package without one gets a line built from the graph, in priority order:
-  the entry points registered in it, the tables it reads or writes (else
-  what it calls out to), who imports it, what it defines. At most two of
-  those, after an italic _no doc recorded_. Not "no docstring": a graph
-  cached before package docs were extracted has none either, and the line
-  must not claim the code lacks one. Import-only changes and external
-  modules are not listed; more than eight packages end in "and N more". It
-  is one list at the top, not a regrouping of the change list by package:
-  "Where this lands" is already the per-package view.
+  every package the change has code in, with what the package is for, and
+  only then, under "What it did", says what the change did to them: a
+  reader cannot weigh "`_stamp` added in `reading`" without knowing what
+  `reading` is. The description is the package's own first sentence, which
+  both extractors now record on the package node, cut at a word past 120
+  characters. A package without one gets a line built from the graph,
+  after an italic _no doc recorded; inferred:_ — the entry points
+  registered or handled in it, the tables it reads or writes (else what it
+  calls), who outside the tests imports it, what it defines; at most two.
+  "No doc recorded", not "no docstring": a graph cached before package docs
+  were extracted has none either. New and removed packages carry the key's
+  🟩 and 🟥. Test packages are named on one closing line (the Python
+  extractor flags them; a Go `_test` package is one whose every definition
+  is a test), and more than eight code packages end in "also" and their
+  names. Import-only changes and external modules are not listed. It is
+  one list at the top, not a regrouping of the change list: "Where this
+  lands" is the per-package view. Its labels and the change list's come
+  from one `delta.PackageLabels` over every package with a changed
+  definition; labelled a sentence at a time, `services/reading` read as
+  `reading` wherever `routers/reading` was not in the same sentence. A
+  doc is the author's text, not markup: it is HTML-escaped outside code
+  spans, and `@name`, `#123` and `!123` are broken with a zero-width space
+  so a docstring mentioning `@dataclass` pings nobody on every post.
 - **Counts name what they count.** `graph.DescribeKinds` turns counts per
   symbol kind into "3 functions and 1 type"; the note never says "symbols".
 - **Colliding package labels are widened (section 10).** Each package drawn

@@ -69,14 +69,14 @@ func TestTouches(t *testing.T) {
 	got := b.String()
 	want := "\n**What it touches**\n\n" +
 		// most changed first; a label is the one the change list uses
-		"- **`turns`**: _new; no doc recorded._ Defines `TurnLog` and `record`.\n" +
+		"- 🟩 **`turns`**: _no doc recorded; inferred:_ defines `TurnLog` and `record`.\n" +
 		// same count: by path, so app/routers before app/services; the two
 		// `reading`s are told apart
-		"- **`routers/reading`**: _no doc recorded._ Serves 3 routes, including `DELETE /readings/{id}` and `GET /readings/allowlist`; talks to the `reading_allowlist` table.\n" +
+		"- **`routers/reading`**: _no doc recorded; inferred:_ serves 3 routes, including `DELETE /readings/{id}` and `GET /readings/allowlist`; talks to the `reading_allowlist` table.\n" +
 		// the package's own words, markdown and all, escaped only for HTML
 		"- **`services/reading`**: Reading service — recommendations and **allowlist** management.\n" +
 		// the most changed package, but test code: one line, last
-		"- and tests in `test_turns`\n" +
+		"- tests: `test_turns`\n" +
 		"\n**What it did**\n"
 	if got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
@@ -94,7 +94,7 @@ func TestTouchesUsedByAndNothing(t *testing.T) {
 	d.Nodes.BodyChanged = []string{graph.SymID("app/util", "slug")}
 	var b strings.Builder
 	writeTouches(&b, NoteInput{Delta: d, Head: head, Base: base})
-	if want := "- **`util`**: _no doc recorded._ Used by `routers/reading` and `services/reading`.\n"; !strings.Contains(b.String(), want) {
+	if want := "- **`util`**: _no doc recorded; inferred:_ used by `routers/reading` and `services/reading`.\n"; !strings.Contains(b.String(), want) {
 		t.Errorf("want %q in:\n%s", want, b.String())
 	}
 
@@ -122,5 +122,64 @@ func TestNamed(t *testing.T) {
 		if got := named(c.items, c.max, c.noun); got != c.want {
 			t.Errorf("named(%v, %d, %q) = %q, want %q", c.items, c.max, c.noun, got, c.want)
 		}
+	}
+}
+
+// The list's labels are the ones the change list uses: both come from
+// delta.PackageLabels, over every package with a changed definition, so
+// `services/reading` is never `reading` in one place and not the other.
+func TestTouchesLabelsAreTheNotesLabels(t *testing.T) {
+	head, base, d := touchesFixture()
+	labels := delta.PackageLabels(d, head, base)
+	for _, tc := range touches(NoteInput{Delta: d, Head: head, Base: base}) {
+		if tc.label != labels[tc.path] {
+			t.Errorf("%s: list says %q, the change list says %q", tc.path, tc.label, labels[tc.path])
+		}
+	}
+	if labels["app/services/reading"] != "services/reading" || labels["app/routers/reading"] != "routers/reading" {
+		t.Errorf("labels = %v", labels)
+	}
+}
+
+// A Go _test package's node carries no test flag; every definition in it
+// does, and that is enough.
+func TestTouchesFoldsGoTestPackages(t *testing.T) {
+	sym := symNode("svc_test", "TestCreate", "func")
+	sym.Attrs.Test = true
+	head := graph.NewIndex(&graph.Document{Nodes: []graph.Node{pkgNode("svc_test", ""), sym, pkgNode("svc", "Package svc serves orders."), symNode("svc", "Create", "func")}})
+	d := &delta.Delta{}
+	d.Nodes.Added = []string{sym.ID, graph.SymID("svc", "Create")}
+	var b strings.Builder
+	writeTouches(&b, NoteInput{Delta: d, Head: head})
+	if !strings.Contains(b.String(), "- tests: `svc_test`\n") || strings.Contains(b.String(), "**`svc_test`**") {
+		t.Errorf("svc_test should be folded into the tests line:\n%s", b.String())
+	}
+}
+
+func TestDocEsc(t *testing.T) {
+	for in, want := range map[string]string{
+		"Models built on @dataclass; see #12 and !7.":        "Models built on @\u200bdataclass; see #\u200b12 and !\u200b7.",
+		"Parses `a < b && @x` and <b>html</b> & friends.":    "Parses `a < b && @x` and &lt;b&gt;html&lt;/b&gt; &amp; friends.",
+		"An unclosed `span with @me":                         "An unclosed `span with @\u200bme",
+		"Nothing to do here.":                                "Nothing to do here.",
+		"Email a@b.com, not a mention? It is broken anyway.": "Email a@\u200bb.com, not a mention? It is broken anyway.",
+	} {
+		if got := docEsc(in); got != want {
+			t.Errorf("docEsc(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCapWords(t *testing.T) {
+	if got := capWords("short", 120); got != "short" {
+		t.Errorf("capWords changed a short doc: %q", got)
+	}
+	long := "Turn traces: each line of the turn log rebuilt as a trace, a tree of timed spans, and sent over OTLP/HTTP to the trace viewer (Jaeger, here)."
+	got := capWords(long, 120)
+	if n := len([]rune(got)); n > 120 || !strings.HasSuffix(got, "…") || strings.HasSuffix(strings.TrimSuffix(got, "…"), " ") {
+		t.Errorf("capWords = %q (%d runes)", got, n)
+	}
+	if !strings.HasPrefix(long, strings.TrimSuffix(got, "…")) {
+		t.Errorf("capWords cut mid-word: %q", got)
 	}
 }

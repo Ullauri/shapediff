@@ -51,10 +51,12 @@ type NoteInput struct {
 }
 
 // SummaryItem is one item of the "What changed" list: Text, then Items
-// nested under it, one per line.
+// nested under it, one per line. IDs, when set, is the definition each item
+// names, index for index ("" for none), and such an item opens to it.
 type SummaryItem struct {
 	Text  string
 	Items []string
+	IDs   []string
 }
 
 // NoStructuralNote is the one-line body used when a later push removed all
@@ -164,10 +166,26 @@ func writeSummary(b *strings.Builder, in NoteInput) {
 	writeTouches(b, in)
 	if len(in.Summary) > 0 {
 		b.WriteString("\n")
+		labels := itemLabels(in)
 		for _, s := range in.Summary {
 			fmt.Fprintf(b, "- %s\n", s.Text)
-			for _, it := range s.Items {
-				fmt.Fprintf(b, "  - %s\n", it)
+			opens := false
+			for i, it := range s.Items {
+				id := ""
+				if i < len(s.IDs) {
+					id = s.IDs[i]
+				}
+				switch {
+				case id != "":
+					writeItem(b, in, it, id, labels)
+					opens = true
+				case opens:
+					// "and N more" under rows that open: a line, not a
+					// bullet among disclosure triangles
+					fmt.Fprintf(b, "\n  %s\n", it)
+				default:
+					fmt.Fprintf(b, "  - %s\n", it)
+				}
 			}
 		}
 	}

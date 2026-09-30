@@ -189,6 +189,21 @@ of the head, `SHAPEDIFF_TOKEN=$(gh auth token)`) and run `shapediff post
   doc is the author's text, not markup: it is HTML-escaped outside code
   spans, and `@name`, `#123` and `!123` are broken with a zero-width space
   so a docstring mentioning `@dataclass` pings nobody on every post.
+- **Every definition in "What it did" opens (14.1, like 10.3).** An item
+  that names a definition ("`_meta_title` in `reading`") is a collapsed
+  row, the same disclosure the call stacks use. Opened, it shows the
+  signature (a before/after diff when that changed), the definition's own
+  first sentence, how it is reached, and a permalink. "How it is reached"
+  is the route it handles, then who calls it by name, with the package
+  when it is another one, and tests counted apart. For a new helper, that
+  names the changed function that now depends on it. "Nothing calls it
+  yet" is said only of new code. Existing code with no recorded caller is
+  said to have none in the code, since a framework callback or a dynamic
+  call is the usual reason, not dead code. The narration sentences carry
+  the ID behind each item (`ItemIDs`) so the renderer can find it, and
+  "and N more" under open-able rows is a plain line, not a bullet among
+  disclosure triangles. Sentences about packages, imports and routes keep
+  their bullets.
 - **Counts name what they count.** `graph.DescribeKinds` turns counts per
   symbol kind into "3 functions and 1 type"; the note never says "symbols".
 - **Colliding package labels are widened (section 10).** Each package drawn

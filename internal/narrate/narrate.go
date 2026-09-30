@@ -61,6 +61,11 @@ type Sentence struct {
 	// nested under the endpoint).
 	Lead  string
 	Items []string
+	// ItemIDs names, for a sentence that lists definitions, the node each
+	// item is about, index for index with Items ("" for "and N more"), so
+	// the note can open an item to its signature, doc and source. Nil for
+	// every other sentence.
+	ItemIDs []string
 }
 
 // Unchanged says which of section 14.1's four standing counts are zero:
@@ -274,6 +279,7 @@ func signatures(d *delta.Delta, head *graph.Index, labels map[string]string) Sen
 			who = fmt.Sprintf("%d %s", callers, plural(callers, "caller", "callers"))
 		}
 		s.Items = append(s.Items, where(sc.ID)+", "+who)
+		s.ItemIDs = append(s.ItemIDs, sc.ID)
 		total += callers
 	}
 	s.Text = strings.Join(parts, "; ") + "."
@@ -284,6 +290,7 @@ func signatures(d *delta.Delta, head *graph.Index, labels map[string]string) Sen
 	s.Lead = fmt.Sprintf("**%d %s changed**, %d %s in all", n, plural(n, "signature", "signatures"), total, plural(total, "caller", "callers"))
 	if len(s.Items) > MaxItems {
 		s.Items = append(s.Items[:MaxItems], fmt.Sprintf("and %d more", len(s.Items)-MaxItems))
+		s.ItemIDs = append(s.ItemIDs[:MaxItems], "")
 	}
 	return s
 }
@@ -402,7 +409,7 @@ func bodyOnly(d *delta.Delta, head *graph.Index, labels map[string]string) Sente
 	// A count is not a triple; the sentence carries no claims. A rewrite
 	// that names nodes is validated claim by claim like any other.
 	s := Sentence{Text: fmt.Sprintf("%d %s changed body only.", n, plural(n, "symbol", "symbols"))}
-	s.Lead, s.Items = kindList(d.Nodes.BodyChanged, head, "edited", "with the same signature", labels)
+	s.Lead, s.Items, s.ItemIDs = kindList(d.Nodes.BodyChanged, head, "edited", "with the same signature", labels)
 	return s
 }
 
@@ -428,7 +435,7 @@ func definitions(d *delta.Delta, ix *graph.Index, what string, labels map[string
 	for _, id := range ids {
 		s.Claims = append(s.Claims, Claim{SubjectID: id, Predicate: pred, Sentence: s.Text})
 	}
-	s.Lead, s.Items = kindList(ids, ix, what, "", labels)
+	s.Lead, s.Items, s.ItemIDs = kindList(ids, ix, what, "", labels)
 	return s
 }
 
@@ -436,7 +443,7 @@ func definitions(d *delta.Delta, ix *graph.Index, what string, labels map[string
 // by kind ("3 functions and 1 type added"), and the items name them with
 // their package. Test code is counted apart and not named, since a
 // reviewer reads the list for what the MR changes in the program.
-func kindList(ids []string, ix *graph.Index, verb, tail string, labels map[string]string) (string, []string) {
+func kindList(ids []string, ix *graph.Index, verb, tail string, labels map[string]string) (string, []string, []string) {
 	prog, tests := map[string]int{}, map[string]int{}
 	nTests := 0
 	var named []string
@@ -471,9 +478,10 @@ func kindList(ids []string, ix *graph.Index, verb, tail string, labels map[strin
 		}
 	}
 	if len(named) == 0 {
-		return lead, nil
+		return lead, nil, nil
 	}
-	return lead, items(named, wherer(named, ix, labels))
+	its, ids := itemsWithIDs(named, wherer(named, ix, labels))
+	return lead, its, ids
 }
 
 func suppressed(d *delta.Delta) Sentence {
@@ -545,17 +553,26 @@ func wherer(ids []string, ix *graph.Index, labels map[string]string) func(string
 // items renders sorted IDs one per list item, up to MaxItems, then
 // "and N more".
 func items(ids []string, render func(string) string) []string {
+	out, _ := itemsWithIDs(ids, render)
+	return out
+}
+
+// itemsWithIDs is items, with the ID behind each item ("" for "and N
+// more").
+func itemsWithIDs(ids []string, render func(string) string) ([]string, []string) {
 	ids = append([]string(nil), ids...)
 	sort.Strings(ids)
-	var out []string
+	var out, of []string
 	for i, id := range ids {
 		if i == MaxItems {
 			out = append(out, fmt.Sprintf("and %d more", len(ids)-MaxItems))
+			of = append(of, "")
 			break
 		}
 		out = append(out, render(id))
+		of = append(of, id)
 	}
-	return out
+	return out, of
 }
 
 func listNames(ids []string, max int) string {

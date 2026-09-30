@@ -407,7 +407,7 @@ func writeStacks(b *strings.Builder, in NoteInput) {
 		return
 	}
 	b.WriteString("\n#### Call stacks\n\n")
-	b.WriteString("What runs when each entry point this MR touches is called: its handler, every call on the way to changed code, " +
+	b.WriteString("What runs when each entry point this " + in.Forge.Change() + " touches is called: its handler, every call on the way to changed code, " +
 		"and the other calls made along the way, as context. `+` is added, `-` removed, `~` a changed signature; an unmarked line is unchanged. " +
 		"Open a line for its signature, what it does and where it is.\n")
 	for i, st := range stacks {

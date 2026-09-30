@@ -9,6 +9,7 @@ import (
 
 	"github.com/Ullauri/shapediff/internal/delta"
 	"github.com/Ullauri/shapediff/internal/filter"
+	"github.com/Ullauri/shapediff/internal/forge"
 	"github.com/Ullauri/shapediff/internal/graph"
 )
 
@@ -233,6 +234,25 @@ func TestNoteGolden(t *testing.T) {
 	}
 	if NoStructuralNote("bbbbbbbbbbbb") != Marker+"\nno structural change at bbbbbbbb\n" {
 		t.Error("no-structural note")
+	}
+
+	// The same note on GitHub: GitHub's permalinks, and the change is a PR.
+	res.Fallback = false
+	gh := in
+	gh.Forge, gh.ProjectURL = forge.GitHub, "https://github.com/acme/svc"
+	got, err = Note(gh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"https://github.com/acme/svc/blob/bbbbbbbbbbbb/api/h.go#L3", "https://github.com/acme/svc/tree/", "This PR changes code in 1 of them", "package this PR changes"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("GitHub note lacks %q", want)
+		}
+	}
+	for _, bad := range []string{"/-/", "This MR", "this MR"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("GitHub note says %q", bad)
+		}
 	}
 }
 

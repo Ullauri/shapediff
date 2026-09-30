@@ -8,6 +8,7 @@ import (
 
 	"github.com/Ullauri/shapediff/internal/delta"
 	"github.com/Ullauri/shapediff/internal/filter"
+	"github.com/Ullauri/shapediff/internal/forge"
 	"github.com/Ullauri/shapediff/internal/graph"
 )
 
@@ -30,6 +31,9 @@ type NoteInput struct {
 	Unchanged   string
 	Suppression string
 	ProjectURL  string // e.g. https://gitlab.example.com/group/svc, "" disables permalinks
+	// Forge is the host ProjectURL is on: it shapes the permalinks and names
+	// the change ("MR" or "PR"). The zero value is GitLab.
+	Forge forge.Forge
 	// WeeklyURL is the weekly structure brief (section 14.2). When set, the
 	// note ends with a pointer to it, for the reader who is behind on the
 	// repo rather than only on this MR. "" prints nothing.
@@ -76,7 +80,7 @@ func Note(in NoteInput) (string, error) {
 	delta := len(in.Filter.Dataflows) > 0 || len(in.Filter.CallPaths) > 0 || in.Filter.Wiring != nil
 	key := ""
 	if pkgMap || delta {
-		key = Key(pkgMap, delta)
+		key = keyFor(pkgMap, delta, in.Forge.Change())
 	}
 	if in.Baseline != nil && (in.Baseline.Map != nil || len(in.Baseline.Touched) > 0) {
 		writeBaseline(&b, in, key)
@@ -198,13 +202,13 @@ func writeBaseline(b *strings.Builder, in NoteInput, key string) {
 	}
 	switch {
 	case changed == 0 && added == 0:
-		b.WriteString(". This MR changes code in none of them.\n")
+		fmt.Fprintf(b, ". This %s changes code in none of them.\n", in.Forge.Change())
 	case changed == 0:
-		fmt.Fprintf(b, ". This MR adds %d new %s.\n", added, plural(added, "package", "packages"))
+		fmt.Fprintf(b, ". This %s adds %d new %s.\n", in.Forge.Change(), added, plural(added, "package", "packages"))
 	case added == 0:
-		fmt.Fprintf(b, ". This MR changes code in %d of them.\n", changed)
+		fmt.Fprintf(b, ". This %s changes code in %d of them.\n", in.Forge.Change(), changed)
 	default:
-		fmt.Fprintf(b, ". This MR changes code in %d of them and adds %d new %s.\n", changed, added, plural(added, "package", "packages"))
+		fmt.Fprintf(b, ". This %s changes code in %d of them and adds %d new %s.\n", in.Forge.Change(), changed, added, plural(added, "package", "packages"))
 	}
 	if len(bl.Touched) > 0 {
 		// One list item per package, not a table row: six columns wrapped
@@ -249,7 +253,7 @@ func writeTouched(b *strings.Builder, in NoteInput, t filter.TouchedPackage) {
 		if t.Status == filter.StatusAdded {
 			sha = in.HeadSHA
 		}
-		name = fmt.Sprintf("[%s](%s/-/tree/%s/%s)", name, strings.TrimRight(in.ProjectURL, "/"), sha, t.Dir)
+		name = fmt.Sprintf("[%s](%s)", name, in.Forge.Tree(in.ProjectURL, sha, t.Dir))
 	}
 	size := graph.DescribeKinds(t.Kinds, 0)
 	if size == "" {
@@ -492,7 +496,7 @@ func permalinkURL(in NoteInput, status, file string, line int) string {
 	if status == filter.StatusRemoved {
 		sha = in.BaseSHA
 	}
-	return fmt.Sprintf("%s/-/blob/%s/%s#L%d", strings.TrimRight(in.ProjectURL, "/"), sha, file, line)
+	return in.Forge.Blob(in.ProjectURL, sha, file, line)
 }
 
 func writeLists(b *strings.Builder, in NoteInput) {

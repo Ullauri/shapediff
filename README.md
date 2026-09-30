@@ -1,6 +1,7 @@
 # shapediff
 
-Structural change legibility for GitLab merge requests. Extracts a typed
+Structural change legibility for GitLab merge requests and GitHub pull
+requests. Extracts a typed
 code graph at an MR's base and head, subtracts them, filters the delta to a
 budget, renders Mermaid into one MR note, and (weekly) rolls a repo's drift
 up into a wiki page. This is the implementation of `shapediff-spec.md`
@@ -41,23 +42,38 @@ the same change.
 ```
 shapediff extract  --repo . [--config .shapediff.yml] [--sha] [--repo-slug] [--extractor <exe>] -o graph.json
 shapediff delta    --base base.json --head head.json [--repo .] [--mr-iid N] -o delta.json
-shapediff render   --delta delta.json --head head.json --base base.json [--project-url URL] [--diagram-only] -o note.md
-shapediff post     [--dry-run]            # the whole per-MR job from CI variables (spec 14.1)
+shapediff render   --delta delta.json --head head.json --base base.json [--project-url URL] [--forge gitlab|github] [--diagram-only] -o note.md
+shapediff post     [--dry-run] [--extractor <exe>]   # the whole per-MR job from CI variables (spec 14.1), GitLab or GitHub
 shapediff weekly   --repos repos.yml | --repo <dir> [--dry-run] [--week YYYY-MM-DD|YYYY-Www]   # spec 14.2
-shapediff query    --graph base.json --symbols Create,(*Service).Get  # spec 18, decision 5
+shapediff query    --graph base.json --symbols Create,(*Service).Get [--project-url URL] [--forge gitlab|github]  # spec 18, decision 5
 shapediff conform  --check graph.json | --fixtures conformance/go [--extractor "<exe>"] [--only a,b]
 shapediff help     [command]              # a command's synopsis and flags; also `<command> -h`
 ```
 
-`extract --extractor <exe>` and `conform --extractor <exe>` run any
+`extract --extractor <exe>`, `conform --extractor <exe>` and `post
+--extractor <exe>` (or `SHAPEDIFF_EXTRACTOR`) run any
 executable under the plug-in contract of spec 6.3: `<exe> --repo <dir>
 --config <path>`, one schema v1 document on stdout, exit 0. The built-in Go
 extractor satisfies it as `shapediff extract`, and the suite proves the seam
 by driving the binary that way (`conform --extractor "bin/shapediff extract"`).
 
-CI: include `ci/shapediff.gitlab-ci.yml` from a repo's `.gitlab-ci.yml`;
-`ci/weekly.gitlab-ci.yml` is the scheduled job for the central structure
-project. Both files document their variables.
+CI on GitLab: include `ci/shapediff.gitlab-ci.yml` from a repo's
+`.gitlab-ci.yml`; `ci/weekly.gitlab-ci.yml` is the scheduled job for the
+central structure project. Both files document their variables.
+
+CI on GitHub: copy `ci/shapediff.github-workflow.yml` to
+`.github/workflows/shapediff.yml`. `post` sees `GITHUB_ACTIONS=true`, reads
+the pull request from `$GITHUB_EVENT_PATH`, and posts one comment on it
+with `GITHUB_TOKEN`, editing that comment on every later push, as it edits
+its note on GitLab. The file documents what it needs. Only the per-PR job
+runs on GitHub; `weekly` is GitLab's (merged-MR listing, wiki page).
+
+The same job runs by hand against any pull request: set the variables
+Actions would (`GITHUB_ACTIONS=true`, `GITHUB_EVENT_NAME=pull_request`,
+`GITHUB_EVENT_PATH` to a file holding `{"pull_request": <gh api
+repos/o/r/pulls/N>}`, `GITHUB_REPOSITORY`, `GITHUB_WORKSPACE` to a checkout
+of the head, `SHAPEDIFF_TOKEN=$(gh auth token)`) and run `shapediff post
+--dry-run` first. The comment is then posted under that token's user.
 
 ## Spec section to package
 
@@ -78,6 +94,7 @@ project. Both files document their variables.
 | 11 narration | `internal/narrate` | template, claim validator, optional OpenAI-compatible rewrite |
 | 13 configuration | `internal/config` | defaults, `config_hash` |
 | 14.1 per MR | `internal/pipeline`, `internal/gitlab`, `internal/cache` | orchestration with injected deps; notes, MR list, wiki, package registry; dir and registry caches |
+| 14.1 on GitHub | `internal/pipeline` `githubEnv`, `internal/github`, `internal/forge` | the Actions environment and merge base; PR comments; permalink shapes and "MR"/"PR" |
 | 14.2 weekly | `internal/weekly`, `cmd_weekly.go` | page and roll-up markdown |
 | 16 tool shape | `cmd/shapediff` | one binary, seven subcommands, `wiring.go` is the glue |
 
@@ -161,6 +178,37 @@ project. Both files document their variables.
   first extraction when the extractor is a plug-in.
 - **Package registry cache** uses one package name (`shapediff`) with the
   cache key as the version, since the key already embeds the repo.
+- **GitHub (14.1 on another forge).** The head is
+  `pull_request.head.sha`, never `GITHUB_SHA`, which on a `pull_request`
+  event is an ephemeral merge commit (GitLab's merged-results trap). The
+  base is the merge base of `pull_request.base.sha` and the head, computed
+  in the checkout, because `base.sha` is the base branch's tip and diffing
+  against it would count everything merged there since the branch forked;
+  GitLab's `CI_MERGE_REQUEST_DIFF_BASE_SHA` is already the merge base. When
+  the merge base cannot be computed (a shallow clone) the tip is used and
+  the job says so. Only `pull_request` runs the job, not
+  `pull_request_target`. The note is the same document on both forges;
+  `internal/forge` holds what differs: permalink shapes (`/blob/` for
+  `/-/blob/`) and the change's name ("This PR", "package this PR changes").
+  The forge comes from the CI environment in `post`, and from `--forge`,
+  else the `--project-url` host, in `render` and `query`. The note is found
+  again by the marker at the start of a comment, not anywhere in one, since
+  a reply quoting the note carries it too, and only in a comment by the
+  token's own user (`github-actions[bot]` for `GITHUB_TOKEN`, which cannot
+  read `/user`; `SHAPEDIFF_COMMENT_AUTHOR` overrides), since anyone who can
+  comment can type the marker. When no merge base is found the fallback is
+  a line on the job's log, not in the note.
+- **GitHub's comment limit** is 65,536 characters; GitLab's note limit is
+  far above any note. A longer note loses its Details section first, with a
+  line pointing at the artifact, keeping the weekly link after it; only if
+  that is not enough is it cut at a line boundary, with the code fences and
+  `<details>` the cut left open closed again.
+- **Plug-in extractors in `post`** key the graph cache on a hash of the
+  extractor command and of every file it names, the interpreter included,
+  in place of the Go toolchain: the Python extractor's output differs
+  between interpreters, and a key that ignored that would hand one
+  interpreter's graph to another. Anything the command loads indirectly is
+  not in the key; clear the cache when that changes.
 - **Weekly page, known cosmetic defect:** the "Where change concentrated"
   table groups by short name, so a sink (`orders`) can appear in the
   Package column.
@@ -179,7 +227,9 @@ project. Both files document their variables.
   warning returned. Both paths are unexecuted on the machine this was
   built on, which has no graphviz.
 - **S3 cache** is not built; `dir:<path>` and the GitLab generic package
-  registry are.
+  registry are. On GitHub the directory cache persists through
+  `actions/cache`, which scopes a pull request's cache to that pull
+  request: later pushes reuse it, other pull requests do not.
 - **Weekly SVG upload**: the page links the SVG the layout step wrote; the
   wiki attachment upload is not in the client.
 - **Pinned positions for the baseline map** (10.1) are not built: Mermaid

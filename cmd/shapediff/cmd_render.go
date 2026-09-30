@@ -10,19 +10,20 @@ import (
 	"github.com/Ullauri/shapediff/internal/config"
 	"github.com/Ullauri/shapediff/internal/delta"
 	"github.com/Ullauri/shapediff/internal/filter"
+	"github.com/Ullauri/shapediff/internal/forge"
 	"github.com/Ullauri/shapediff/internal/graph"
 	"github.com/Ullauri/shapediff/internal/narrate"
 	"github.com/Ullauri/shapediff/internal/render"
 )
 
 func init() {
-	register(command{name: "render", synopsis: "--delta delta.json --head head.json --base base.json [--project-url URL] [--diagram-only] [-o note.md]", short: "render a delta as an MR note (Mermaid + narration)", run: runRender})
+	register(command{name: "render", synopsis: "--delta delta.json --head head.json --base base.json [--project-url URL] [--forge gitlab|github] [--diagram-only] [-o note.md]", short: "render a delta as an MR note (Mermaid + narration)", run: runRender})
 }
 
 // renderNote is the shared path from delta and graphs to note text. It is
 // used by render and by post. It returns the note, the filter result (for
 // the SVG fallback) and warnings to print.
-func renderNote(d *delta.Delta, head, base *graph.Index, cfg *config.Config, projectURL string, started time.Time) (string, *filter.Result, []string, error) {
+func renderNote(d *delta.Delta, head, base *graph.Index, cfg *config.Config, projectURL string, fg forge.Forge, started time.Time) (string, *filter.Result, []string, error) {
 	var warnings []string
 	budget := filter.Budget{Chars: cfg.Budget.Chars, Nodes: cfg.Budget.Nodes, Edges: cfg.Budget.Edges, NarrowTargets: cfg.NarrowTargets}
 	opts := filter.Options{Budget: budget, Measure: func(dg *filter.Diagram) int { return len(render.Mermaid(dg)) }}
@@ -67,7 +68,7 @@ func renderNote(d *delta.Delta, head, base *graph.Index, cfg *config.Config, pro
 	note, err := render.Note(render.NoteInput{
 		Delta: d, Head: head, Base: base, Filter: res, Baseline: bl,
 		Summary: summary, Unchanged: narrate.Unchanged(d), Suppression: narrate.SuppressionLine(d),
-		ProjectURL: projectURL, WeeklyURL: cfg.WeeklyURL, HeadSHA: d.HeadSHA, BaseSHA: d.BaseSHA, MRIID: d.MRIID,
+		ProjectURL: projectURL, Forge: fg, WeeklyURL: cfg.WeeklyURL, HeadSHA: d.HeadSHA, BaseSHA: d.BaseSHA, MRIID: d.MRIID,
 		Extractor: head.Doc.Extractor, Elapsed: time.Since(started),
 	})
 	return note, res, warnings, err
@@ -80,6 +81,7 @@ func runRender(args []string) error {
 	basePath := fs.String("base", "", "base graph (required)")
 	cfgPath := fs.String("config", "", "repo config (.shapediff.yml); defaults when absent")
 	projectURL := fs.String("project-url", "", "project web URL for permalinks")
+	forgeName := fs.String("forge", "", "gitlab or github: the permalink shape and what the note calls the change (default: from --project-url, github.com is github)")
 	weeklyURL := fs.String("weekly-url", "", "URL of the weekly structure brief; overrides weekly_url in the config")
 	mrIID := fs.Int("mr-iid", 0, "merge request iid to record in the note")
 	out := fs.String("o", "", "output file (default stdout)")
@@ -89,6 +91,10 @@ func runRender(args []string) error {
 	}
 	if *deltaPath == "" || *headPath == "" || *basePath == "" {
 		return usagef("--delta, --head and --base are required")
+	}
+	fg, err := forgeFor(*forgeName, *projectURL)
+	if err != nil {
+		return usagef("%v", err)
 	}
 	started := time.Now()
 	d, err := delta.ReadFile(*deltaPath)
@@ -133,7 +139,7 @@ func runRender(args []string) error {
 		_, err := io.WriteString(w, render.Mermaid(&res.CallPaths[0]))
 		return err
 	}
-	note, res, warnings, err := renderNote(d, head, base, cfg, *projectURL, started)
+	note, res, warnings, err := renderNote(d, head, base, cfg, *projectURL, fg, started)
 	if err != nil {
 		return err
 	}
@@ -145,4 +151,12 @@ func runRender(args []string) error {
 	}
 	_, err = io.WriteString(w, note)
 	return err
+}
+
+// forgeFor is the --forge flag, or the forge the project URL is on.
+func forgeFor(flag, projectURL string) (forge.Forge, error) {
+	if flag != "" {
+		return forge.Parse(flag)
+	}
+	return forge.FromURL(projectURL), nil
 }

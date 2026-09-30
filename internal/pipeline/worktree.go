@@ -57,3 +57,12 @@ func HeadSHA(ctx context.Context, repoDir string) (string, error) {
 	}
 	return strings.TrimSpace(string(out)), nil
 }
+
+// MergeBase returns the best common ancestor of a and b in repoDir.
+func MergeBase(ctx context.Context, repoDir, a, b string) (string, error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "merge-base", a, b).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git merge-base: %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}

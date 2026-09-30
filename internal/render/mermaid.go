@@ -27,13 +27,16 @@ import (
 // single key had replaced. A clause that describes only one kind of diagram
 // is written only when that kind is drawn: pkgMap for the package map, delta
 // for any of dataflow, call paths or module wiring.
-func Key(pkgMap, delta bool) string {
+func Key(pkgMap, delta bool) string { return keyFor(pkgMap, delta, "MR") }
+
+// keyFor is Key with the change named the way the forge names it.
+func keyFor(pkgMap, delta bool, change string) string {
 	colours := []string{"🟩 added", "🟥 removed (dashed)"}
 	if delta {
 		colours = append(colours, "🟨 signature changed")
 	}
 	if pkgMap {
-		colours = append(colours, "🟪 package this MR changes")
+		colours = append(colours, "🟪 package this "+change+" changes")
 	}
 	colours = append(colours, "⬜ unchanged, drawn for context")
 	shapes := "**rounded** entry point · **double border** package · **cylinder** data store"

@@ -23,7 +23,8 @@ const Marker = "<!-- shapediff:v1 -->"
 // structural" from "the job did not run".
 const ArtifactPath = "shapediff/delta.json"
 
-// NotesAPI is the slice of the GitLab client the job needs.
+// NotesAPI is the slice of the forge's client the job needs: the notes of a
+// GitLab MR, or the comments of a GitHub pull request.
 type NotesAPI interface {
 	FindMarkedNote(ctx context.Context, iid int, marker string) (noteID int, body string, found bool, err error)
 	CreateNote(ctx context.Context, iid int, body string) error
@@ -102,7 +103,7 @@ func Run(ctx context.Context, env Env, deps Deps) (Outcome, error) {
 	}
 	if !env.IsMergeRequestEvent() {
 		out.Skipped = true
-		deps.logf("pipeline source %q is not merge_request_event; nothing to do", env.PipelineSource)
+		deps.logf("pipeline source %q is not %s; nothing to do", env.PipelineSource, env.EventName())
 		return out, nil
 	}
 	out.HeadSHA = env.HeadSHA()

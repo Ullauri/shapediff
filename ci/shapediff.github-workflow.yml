@@ -1,0 +1,96 @@
+# shapediff: GitHub Actions workflow for the per-PR structural change comment
+# (spec section 14.1, on GitHub). Copy to .github/workflows/shapediff.yml in
+# the repo to be analysed.
+#
+# What it needs:
+#   - permissions: pull-requests: write, so GITHUB_TOKEN can post the one
+#     comment and edit it on the next push. On a pull request from a fork
+#     GITHUB_TOKEN is read-only: the comment is not posted, the job still
+#     passes and the delta artifact is still uploaded. `post` does not run
+#     under pull_request_target, which would get a writable token: that event
+#     runs with the base repository's secrets, and this job checks out and
+#     reads the pull request's code.
+#   - fetch-depth: 0, so the base commit is present for the base graph, for
+#     the merge base shapediff diffs against, and for `git diff -M`.
+#   - SHAPEDIFF_READ_TOKEN: a secret holding a token that can read the
+#     private Ullauri/shapediff repo (a fine-grained token with Contents:
+#     read on that one repo). GITHUB_TOKEN cannot read another private repo.
+#   - For a repo that is not Go, the extractor to run instead of the built-in
+#     Go one, as SHAPEDIFF_EXTRACTOR. The Python extractor ships in the
+#     shapediff repo and needs Python 3.10 or later: 3.9 lacks
+#     sys.stdlib_module_names and counts the standard library as third-party
+#     packages. Uncomment the two Python lines below.
+
+name: shapediff
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: shapediff-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  shapediff:
+    runs-on: ubuntu-latest
+    # The job must never block a pull request (spec 14.1 failure mode).
+    # `post` already exits 0 on every runtime failure; this covers the rest.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check out shapediff
+        uses: actions/checkout@v4
+        with:
+          repository: Ullauri/shapediff
+          ref: master # pin a tag once one carries GitHub support
+          token: ${{ secrets.SHAPEDIFF_READ_TOKEN }}
+          path: .shapediff-src
+
+      # Out of the workspace before anything is extracted, so the tool's own
+      # source is not read as part of this repo.
+      - name: Move shapediff out of the workspace
+        run: mv .shapediff-src "$RUNNER_TEMP/shapediff-src"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: ${{ runner.temp }}/shapediff-src/go.mod
+
+      - name: Build shapediff
+        run: go build -C "$RUNNER_TEMP/shapediff-src" -o "$RUNNER_TEMP/bin/shapediff" ./cmd/shapediff
+
+      # - uses: actions/setup-python@v5
+      #   with:
+      #     python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: .shapediff-cache
+          key: shapediff-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          restore-keys: |
+            shapediff-${{ github.event.pull_request.number }}-
+            shapediff-
+
+      - name: Post the structural change comment
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # SHAPEDIFF_EXTRACTOR: python3 ${{ runner.temp }}/shapediff-src/extractors/python/shapediff-py
+        run: |
+          "$RUNNER_TEMP/bin/shapediff" version
+          "$RUNNER_TEMP/bin/shapediff" post
+
+      # Always published, structural or not, so a reader (or an agent
+      # reviewer) can tell "nothing structural" from "the job did not run".
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shapediff-delta
+          path: shapediff/delta.json
+          retention-days: 90
+          if-no-files-found: ignore

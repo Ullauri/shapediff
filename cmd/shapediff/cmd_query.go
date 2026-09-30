@@ -9,6 +9,7 @@ import (
 	"github.com/Ullauri/shapediff/internal/config"
 	"github.com/Ullauri/shapediff/internal/delta"
 	"github.com/Ullauri/shapediff/internal/filter"
+	"github.com/Ullauri/shapediff/internal/forge"
 	"github.com/Ullauri/shapediff/internal/graph"
 	"github.com/Ullauri/shapediff/internal/render"
 )
@@ -23,12 +24,17 @@ func runQuery(args []string) error {
 	symbols := fs.String("symbols", "", "comma-separated symbol IDs or short names (required)")
 	cfgPath := fs.String("config", "", "repo config for budgets (optional)")
 	projectURL := fs.String("project-url", "", "project web URL for permalinks")
+	forgeName := fs.String("forge", "", "gitlab or github: the permalink shape (default: from --project-url)")
 	out := fs.String("o", "", "output file (default stdout)")
 	if err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if *graphPath == "" || *symbols == "" {
 		return usagef("--graph and --symbols are required")
+	}
+	fg, err := forgeFor(*forgeName, *projectURL)
+	if err != nil {
+		return usagef("%v", err)
 	}
 	doc, err := graph.ReadFile(*graphPath)
 	if err != nil {
@@ -42,7 +48,7 @@ func runQuery(args []string) error {
 	}
 	ix := graph.NewIndex(doc)
 	ids, unknown := resolveSymbols(ix, strings.Split(*symbols, ","))
-	md := Query(ix, ids, unknown, cfg, *projectURL)
+	md := Query(ix, ids, unknown, cfg, *projectURL, fg)
 	if *out == "" {
 		_, err = os.Stdout.WriteString(md)
 		return err
@@ -85,7 +91,7 @@ func resolveSymbols(ix *graph.Index, names []string) (ids, unknown []string) {
 // Query renders the base-graph answer of spec section 18, decision 5: for
 // each named symbol, who calls it, what it reaches, which entry points sit
 // above it; then one diagram through the same filter and renderer.
-func Query(ix *graph.Index, ids, unknown []string, cfg *config.Config, projectURL string) string {
+func Query(ix *graph.Index, ids, unknown []string, cfg *config.Config, projectURL string, fg forge.Forge) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## shapediff query at %s\n\n", short(ix.Doc.SHA))
 	for _, u := range unknown {
@@ -97,7 +103,7 @@ func Query(ix *graph.Index, ids, unknown []string, cfg *config.Config, projectUR
 		if n.File != "" {
 			fmt.Fprintf(&b, "%s:%d", n.File, n.Line)
 			if projectURL != "" {
-				fmt.Fprintf(&b, " ([permalink](%s/-/blob/%s/%s#L%d))", projectURL, ix.Doc.SHA, n.File, n.Line)
+				fmt.Fprintf(&b, " ([permalink](%s))", fg.Blob(projectURL, ix.Doc.SHA, n.File, n.Line))
 			}
 			b.WriteString("\n\n")
 		}

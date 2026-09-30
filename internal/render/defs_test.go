@@ -109,15 +109,95 @@ func TestMdToHTML(t *testing.T) {
 	}
 }
 
-func TestLabelForAvoidsTheTouchedLabels(t *testing.T) {
+func TestCallerLabels(t *testing.T) {
 	labels := map[string]string{"app/services/reading": "reading"}
-	for path, want := range map[string]string{
-		"app/services/reading": "reading",
-		"app/routers/reading":  "routers/reading",
+	got := callerLabels([]string{"app/services/reading", "app/routers/reading", "x/util", "y/util", "app/database"}, labels)
+	for p, want := range map[string]string{
+		"app/services/reading": "reading",         // the page's own label
+		"app/routers/reading":  "routers/reading", // not the page's `reading`
+		"x/util":               "x/util",          // two utils stay two
+		"y/util":               "y/util",
 		"app/database":         "database",
 	} {
-		if got := labelFor(path, labels); got != want {
-			t.Errorf("labelFor(%s) = %q, want %q", path, got, want)
+		if got[p] != want {
+			t.Errorf("label of %s = %q, want %q (all %v)", p, got[p], want, got)
 		}
+	}
+}
+
+func TestBlockSafe(t *testing.T) {
+	for in, want := range map[string]string{
+		"```python example.":         "\\```python example.",
+		"# not a heading":            "\\# not a heading",
+		"- not a list":               "\\- not a list",
+		"1. not a list":              "1\\. not a list",
+		"---":                        "\\---",
+		"**Bold** start stays bold.": "**Bold** start stays bold.",
+		"-flag is prose":             "-flag is prose",
+		"2026 was a year.":           "2026 was a year.",
+		"Plain sentence.":            "Plain sentence.",
+	} {
+		if got := blockSafe(in); got != want {
+			t.Errorf("blockSafe(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestShowSignature(t *testing.T) {
+	for in, want := range map[string]string{
+		"def _TitleParser.handle_starttag(self, tag: str) -> None": "def handle_starttag(self, tag: str) -> None",
+		"async def A.B.run(self)":                                  "async def run(self)",
+		"def plain(x)":                                             "def plain(x)",
+		"func (*Service) Create(ctx context.Context) error":        "func (*Service) Create(ctx context.Context) error",
+		"class":  "",
+		"struct": "",
+	} {
+		if got := showSignature(in); got != want {
+			t.Errorf("showSignature(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestEntryAndRecursion(t *testing.T) {
+	fn := func(p, name string) graph.Node {
+		n := graph.Node{ID: graph.SymID(p, name), Kind: graph.KindSymbol, Name: name, Package: p}
+		n.Attrs.SymbolKind = "func"
+		return n
+	}
+	ep := func(kind, name string) graph.Node {
+		return graph.Node{ID: "entry:" + kind + ":" + name, Kind: graph.KindEntrypoint, Name: name, Attrs: graph.NodeAttrs{EntryKind: kind}}
+	}
+	main, nightly, walk := fn("cmd/x", "main"), fn("jobs", "Nightly"), fn("tree", "walk")
+	ix := graph.NewIndex(&graph.Document{Nodes: []graph.Node{main, nightly, walk, ep("cli", "x"), ep("cron", "Nightly")}, Edges: []graph.Edge{
+		{From: "entry:cli:x", To: main.ID, Kind: "handles"},
+		{From: "entry:cron:Nightly", To: nightly.ID, Kind: "handles"},
+		{From: walk.ID, To: walk.ID, Kind: graph.EdgeCalls}, // recursion
+		{From: walk.ID, To: walk.ID, Kind: graph.EdgeCalls},
+	}})
+	if got := callersLine(ix, ix.Node(main.ID), false, false, nil); got != "Runs as the `x` command." {
+		t.Errorf("cli: %q", got)
+	}
+	if got := callersLine(ix, ix.Node(nightly.ID), false, false, nil); got != "Runs on a schedule." {
+		t.Errorf("cron: %q", got)
+	}
+	// a function that only calls itself has no caller, and the count the
+	// change list prints agrees
+	if got := callersLine(ix, ix.Node(walk.ID), false, false, nil); got != "No caller in the code; a framework or a dynamic call may reach it." {
+		t.Errorf("recursion: %q", got)
+	}
+	if n := len(ix.CallerIDs(walk.ID)); n != 0 {
+		t.Errorf("CallerIDs counts a self-call: %d", n)
+	}
+}
+
+func TestBulletAfterRowIsNotSwallowed(t *testing.T) {
+	in := defsFixture()
+	R := "app/services/reading"
+	in.Summary = []SummaryItem{{Text: "**2 functions added**", Items: []string{"`_stamp` in `reading`", "`ghost` in `reading`"},
+		IDs: []string{graph.SymID(R, "_stamp"), graph.SymID(R, "ghost")}}} // ghost is in no graph
+	var b strings.Builder
+	writeSummary(&b, in)
+	if !strings.Contains(b.String(), "  </details>\n\n  - `ghost` in `reading`\n") {
+		t.Errorf("a bullet after a row needs a blank line, or it is printed raw:\n%s", b.String())
 	}
 }

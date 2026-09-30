@@ -177,8 +177,7 @@ func writeSummary(b *strings.Builder, in NoteInput) {
 				}
 				switch {
 				case id != "":
-					writeItem(b, in, it, id, labels)
-					opens = true
+					opens = writeItem(b, in, it, id, labels, opens) || opens
 				case opens:
 					// "and N more" under rows that open: a line, not a
 					// bullet among disclosure triangles

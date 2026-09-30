@@ -270,7 +270,7 @@ func signatures(d *delta.Delta, head *graph.Index, labels map[string]string) Sen
 	for _, sc := range d.Nodes.SignatureChanged {
 		callers := 0
 		if head != nil {
-			callers = len(head.Callers(sc.ID))
+			callers = len(head.CallerIDs(sc.ID))
 		}
 		parts = append(parts, fmt.Sprintf("%s changed signature (%d %s)", name(sc.ID), callers, plural(callers, "caller", "callers")))
 		s.Claims = append(s.Claims, Claim{SubjectID: sc.ID, Predicate: PredSignatureChanged})

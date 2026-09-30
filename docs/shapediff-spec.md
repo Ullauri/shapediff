@@ -200,7 +200,10 @@ ID conventions (stable across SHAs by construction):
 
 `doc` is optional. It holds the first sentence of the definition's doc
 comment (Go) or docstring (Python), cut to 160 characters, and the call
-stacks of section 10.3 quote it. It is never part of a fingerprint or body
+stacks of section 10.3 quote it. On a package node it is the package
+comment (Go, from `doc.go` when there is one) or the module docstring
+(Python), and the note's "What it touches" list (section 14.1) opens with
+it. It is never part of a fingerprint or body
 hash, since editing a comment is not a structural change, and no invariant
 or conformance assertion reads it, so an extractor that leaves it out still
 conforms.

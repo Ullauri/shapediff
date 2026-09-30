@@ -61,6 +61,11 @@ type Sentence struct {
 	// nested under the endpoint).
 	Lead  string
 	Items []string
+	// ItemIDs names, for a sentence that lists definitions, the node each
+	// item is about, index for index with Items ("" for "and N more"), so
+	// the note can open an item to its signature, doc and source. Nil for
+	// every other sentence.
+	ItemIDs []string
 }
 
 // Unchanged says which of section 14.1's four standing counts are zero:
@@ -132,6 +137,9 @@ func SuppressionLine(d *delta.Delta) string {
 // bounded by the number of classes and needs no cap of its own.
 func Template(d *delta.Delta, head, base *graph.Index) []Sentence {
 	var out []Sentence
+	// one set of package labels for every sentence, and for the note's
+	// "What it touches" list, which uses the same function
+	labels := delta.PackageLabels(d, head, base)
 	add := func(s Sentence) {
 		if s.Text != "" {
 			out = append(out, s)
@@ -140,13 +148,13 @@ func Template(d *delta.Delta, head, base *graph.Index) []Sentence {
 	add(entrypointsAdded(d))
 	add(entrypointsRemoved(d))
 	add(reachChanged(d))
-	add(signatures(d, head))
+	add(signatures(d, head, labels))
 	add(renames(d))
-	add(definitions(d, head, "added"))
-	add(definitions(d, base, "removed"))
+	add(definitions(d, head, "added", labels))
+	add(definitions(d, base, "removed", labels))
 	add(packages(d))
 	add(imports(d))
-	add(bodyOnly(d, head))
+	add(bodyOnly(d, head, labels))
 	add(suppressed(d))
 	return out
 }
@@ -247,7 +255,7 @@ func reachChanged(d *delta.Delta) Sentence {
 	return s
 }
 
-func signatures(d *delta.Delta, head *graph.Index) Sentence {
+func signatures(d *delta.Delta, head *graph.Index, labels map[string]string) Sentence {
 	if len(d.Nodes.SignatureChanged) == 0 {
 		return Sentence{}
 	}
@@ -258,11 +266,11 @@ func signatures(d *delta.Delta, head *graph.Index) Sentence {
 	for _, sc := range d.Nodes.SignatureChanged {
 		ids = append(ids, sc.ID)
 	}
-	where := wherer(ids, head)
+	where := wherer(ids, head, labels)
 	for _, sc := range d.Nodes.SignatureChanged {
 		callers := 0
 		if head != nil {
-			callers = len(head.Callers(sc.ID))
+			callers = len(head.CallerIDs(sc.ID))
 		}
 		parts = append(parts, fmt.Sprintf("%s changed signature (%d %s)", name(sc.ID), callers, plural(callers, "caller", "callers")))
 		s.Claims = append(s.Claims, Claim{SubjectID: sc.ID, Predicate: PredSignatureChanged})
@@ -271,6 +279,7 @@ func signatures(d *delta.Delta, head *graph.Index) Sentence {
 			who = fmt.Sprintf("%d %s", callers, plural(callers, "caller", "callers"))
 		}
 		s.Items = append(s.Items, where(sc.ID)+", "+who)
+		s.ItemIDs = append(s.ItemIDs, sc.ID)
 		total += callers
 	}
 	s.Text = strings.Join(parts, "; ") + "."
@@ -281,6 +290,7 @@ func signatures(d *delta.Delta, head *graph.Index) Sentence {
 	s.Lead = fmt.Sprintf("**%d %s changed**, %d %s in all", n, plural(n, "signature", "signatures"), total, plural(total, "caller", "callers"))
 	if len(s.Items) > MaxItems {
 		s.Items = append(s.Items[:MaxItems], fmt.Sprintf("and %d more", len(s.Items)-MaxItems))
+		s.ItemIDs = append(s.ItemIDs[:MaxItems], "")
 	}
 	return s
 }
@@ -391,7 +401,7 @@ func imports(d *delta.Delta) Sentence {
 	return s
 }
 
-func bodyOnly(d *delta.Delta, head *graph.Index) Sentence {
+func bodyOnly(d *delta.Delta, head *graph.Index, labels map[string]string) Sentence {
 	n := len(d.Nodes.BodyChanged)
 	if n == 0 {
 		return Sentence{}
@@ -399,14 +409,14 @@ func bodyOnly(d *delta.Delta, head *graph.Index) Sentence {
 	// A count is not a triple; the sentence carries no claims. A rewrite
 	// that names nodes is validated claim by claim like any other.
 	s := Sentence{Text: fmt.Sprintf("%d %s changed body only.", n, plural(n, "symbol", "symbols"))}
-	s.Lead, s.Items = kindList(d.Nodes.BodyChanged, head, "edited", "with the same signature")
+	s.Lead, s.Items, s.ItemIDs = kindList(d.Nodes.BodyChanged, head, "edited", "with the same signature", labels)
 	return s
 }
 
 // definitions is the added or removed definitions (symbols), read from
 // the head graph for added and the base graph for removed. Entry points,
 // sinks and packages have sentences of their own.
-func definitions(d *delta.Delta, ix *graph.Index, what string) Sentence {
+func definitions(d *delta.Delta, ix *graph.Index, what string, labels map[string]string) Sentence {
 	src := d.Nodes.Added
 	pred := PredAdded
 	if what == "removed" {
@@ -425,7 +435,7 @@ func definitions(d *delta.Delta, ix *graph.Index, what string) Sentence {
 	for _, id := range ids {
 		s.Claims = append(s.Claims, Claim{SubjectID: id, Predicate: pred, Sentence: s.Text})
 	}
-	s.Lead, s.Items = kindList(ids, ix, what, "")
+	s.Lead, s.Items, s.ItemIDs = kindList(ids, ix, what, "", labels)
 	return s
 }
 
@@ -433,7 +443,7 @@ func definitions(d *delta.Delta, ix *graph.Index, what string) Sentence {
 // by kind ("3 functions and 1 type added"), and the items name them with
 // their package. Test code is counted apart and not named, since a
 // reviewer reads the list for what the MR changes in the program.
-func kindList(ids []string, ix *graph.Index, verb, tail string) (string, []string) {
+func kindList(ids []string, ix *graph.Index, verb, tail string, labels map[string]string) (string, []string, []string) {
 	prog, tests := map[string]int{}, map[string]int{}
 	nTests := 0
 	var named []string
@@ -468,9 +478,10 @@ func kindList(ids []string, ix *graph.Index, verb, tail string) (string, []strin
 		}
 	}
 	if len(named) == 0 {
-		return lead, nil
+		return lead, nil, nil
 	}
-	return lead, items(named, wherer(named, ix))
+	its, ids := itemsWithIDs(named, wherer(named, ix, labels))
+	return lead, its, ids
 }
 
 func suppressed(d *delta.Delta) Sentence {
@@ -506,9 +517,10 @@ func name(id string) string {
 }
 
 // wherer names definitions with their package, "`Create` in `orders`",
-// each package by the shortest trailing path unique among the packages
-// of ids, so two packages called `pipelines` do not read as one.
-func wherer(ids []string, ix *graph.Index) func(string) string {
+// each package by its label in labels (delta.PackageLabels), else by the
+// shortest trailing path unique among the packages of ids, so two
+// packages called `pipelines` do not read as one.
+func wherer(ids []string, ix *graph.Index, labels map[string]string) func(string) string {
 	pkgOf := func(id string) string {
 		if ix != nil {
 			if p := ix.PackageOf(id); p != "" {
@@ -525,9 +537,13 @@ func wherer(ids []string, ix *graph.Index) func(string) string {
 			paths = append(paths, p)
 		}
 	}
-	labels := graph.UniqueSuffixes(paths)
+	local := graph.UniqueSuffixes(paths)
 	return func(id string) string {
-		if l := labels[pkgOf(id)]; l != "" {
+		l := labels[pkgOf(id)]
+		if l == "" {
+			l = local[pkgOf(id)]
+		}
+		if l != "" {
 			return name(id) + " in `" + l + "`"
 		}
 		return name(id)
@@ -537,17 +553,26 @@ func wherer(ids []string, ix *graph.Index) func(string) string {
 // items renders sorted IDs one per list item, up to MaxItems, then
 // "and N more".
 func items(ids []string, render func(string) string) []string {
+	out, _ := itemsWithIDs(ids, render)
+	return out
+}
+
+// itemsWithIDs is items, with the ID behind each item ("" for "and N
+// more").
+func itemsWithIDs(ids []string, render func(string) string) ([]string, []string) {
 	ids = append([]string(nil), ids...)
 	sort.Strings(ids)
-	var out []string
+	var out, of []string
 	for i, id := range ids {
 		if i == MaxItems {
 			out = append(out, fmt.Sprintf("and %d more", len(ids)-MaxItems))
+			of = append(of, "")
 			break
 		}
 		out = append(out, render(id))
+		of = append(of, id)
 	}
-	return out
+	return out, of
 }
 
 func listNames(ids []string, max int) string {

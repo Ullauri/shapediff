@@ -278,7 +278,8 @@ func Fit(body string) (string, bool) {
 func closeOpen(s string) string {
 	fenced, open := false, 0
 	for _, line := range strings.Split(s, "\n") {
-		if strings.HasPrefix(line, "```") {
+		// fences inside a list item are indented
+		if strings.HasPrefix(strings.TrimLeft(line, " "), "```") {
 			fenced = !fenced
 			continue
 		}

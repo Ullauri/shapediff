@@ -58,7 +58,7 @@ func renderNote(d *delta.Delta, head, base *graph.Index, cfg *config.Config, pro
 		case cfg.Narration == "off":
 			summary = append(summary, render.SummaryItem{Text: s.Lead})
 		default:
-			summary = append(summary, render.SummaryItem{Text: s.Lead, Items: s.Items})
+			summary = append(summary, render.SummaryItem{Text: s.Lead, Items: s.Items, IDs: s.ItemIDs})
 		}
 	}
 	var bl *filter.Baseline

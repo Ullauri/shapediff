@@ -129,7 +129,7 @@ func TestTemplateListForm(t *testing.T) {
 // segment are named by enough of their path to tell them apart.
 func TestWhererWidensClashingPackages(t *testing.T) {
 	ids := []string{"sym:app/routers/pipelines.dismiss", "sym:app/services/pipelines.dismiss", "sym:app/store.Get"}
-	where := wherer(ids, nil)
+	where := wherer(ids, nil, nil)
 	got := []string{where(ids[0]), where(ids[1]), where(ids[2])}
 	want := []string{"`dismiss` in `routers/pipelines`", "`dismiss` in `services/pipelines`", "`Get` in `store`"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
@@ -293,5 +293,30 @@ func TestOpenAIClient(t *testing.T) {
 	defer bad.Close()
 	if _, err := (OpenAIClient{Endpoint: bad.URL}).Claims(context.Background(), "", ""); err == nil {
 		t.Error("500 must error")
+	}
+}
+
+// A package is labelled once for the whole note: `services/reading` keeps
+// its directory in the "added" sentence even though only the "edited"
+// sentence names `routers/reading`, the package it would be confused with.
+func TestLabelsAgreeAcrossSentences(t *testing.T) {
+	sym := func(p, n string) graph.Node {
+		x := graph.Node{ID: graph.SymID(p, n), Kind: graph.KindSymbol, Name: n, Package: p}
+		x.Attrs.SymbolKind = "func"
+		return x
+	}
+	head := graph.NewIndex(&graph.Document{Nodes: []graph.Node{sym("app/services/reading", "_stamp"), sym("app/routers/reading", "patch")}})
+	d := &delta.Delta{}
+	d.Nodes.Added = []string{graph.SymID("app/services/reading", "_stamp")}
+	d.Nodes.BodyChanged = []string{graph.SymID("app/routers/reading", "patch")}
+	var all []string
+	for _, s := range Template(d, head, head) {
+		all = append(all, s.Items...)
+	}
+	got := strings.Join(all, "\n")
+	for _, want := range []string{"`_stamp` in `services/reading`", "`patch` in `routers/reading`"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("want %q in:\n%s", want, got)
+		}
 	}
 }

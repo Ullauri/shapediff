@@ -91,6 +91,9 @@ func TestRichFixture(t *testing.T) {
 		"sym:" + M + "/svc.NewServer":        "NewServer wires the cache.",
 		"sym:" + M + "/svc.(*Server).Create": "Create is the implemented gRPC method.",
 		"sym:" + M + "/svc.Server":           "Server implements the gRPC service and serves HTTP.",
+		// and on packages, from the package comment
+		"pkg:" + M + "/svc":   "Package svc is the service: gRPC methods, HTTP handlers, closures and method values.",
+		"pkg:" + M + "/cache": "Package cache is a generic cache, to exercise positional type parameters.",
 	} {
 		if n := ix.Node(id); n == nil || n.Attrs.Doc != want {
 			t.Errorf("doc of %s = %+v, want %q", id, n, want)

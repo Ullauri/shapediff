@@ -276,6 +276,9 @@ func (x *extractor) astPass() {
 		if x.status[path] == graph.LoadFailed {
 			continue
 		}
+		if n := x.nodes[graph.PkgID(path)]; n != nil {
+			n.Attrs.Doc = packageDoc(p)
+		}
 		seen := map[string]bool{}
 		for i, f := range p.Syntax {
 			name := p.CompiledGoFiles[i]
@@ -1283,6 +1286,25 @@ func synopsis(cg *ast.CommentGroup) string {
 		s = strings.TrimSpace(string(r[:docCap-1])) + "…"
 	}
 	return s
+}
+
+// packageDoc is the package comment's synopsis (section 6.1): from doc.go
+// when the package has one, the Go convention for a long package comment,
+// else from the first file that carries a package comment.
+func packageDoc(p *packages.Package) string {
+	var first *ast.CommentGroup
+	for i, f := range p.Syntax {
+		if f.Doc == nil {
+			continue
+		}
+		if i < len(p.CompiledGoFiles) && filepath.Base(p.CompiledGoFiles[i]) == "doc.go" {
+			return synopsis(f.Doc)
+		}
+		if first == nil {
+			first = f.Doc
+		}
+	}
+	return synopsis(first)
 }
 
 // specDoc is a type or value spec's doc: its own comment, else the

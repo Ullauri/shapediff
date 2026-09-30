@@ -165,6 +165,45 @@ of the head, `SHAPEDIFF_TOKEN=$(gh auth token)`) and run `shapediff post
   count with the names under it, which the note prints. The four standing
   counts that are zero share one line under the list. `narrate.Sentence`
   carries both forms; `cmd_render.go` picks one per sentence.
+- **What it touches (sections 6.1, 14.1).** "What changed" opens with
+  every package the change has code in, with what the package is for, and
+  only then, under "What it did", says what the change did to them: a
+  reader cannot weigh "`_stamp` added in `reading`" without knowing what
+  `reading` is. The description is the package's own first sentence, which
+  both extractors now record on the package node, cut at a word past 120
+  characters. A package without one gets a line built from the graph,
+  after an italic _no doc recorded; inferred:_ — the entry points
+  registered or handled in it, the tables it reads or writes (else what it
+  calls), who outside the tests imports it, what it defines; at most two.
+  "No doc recorded", not "no docstring": a graph cached before package docs
+  were extracted has none either. New and removed packages carry the key's
+  🟩 and 🟥. Test packages are named on one closing line (the Python
+  extractor flags them; a Go `_test` package is one whose every definition
+  is a test), and more than eight code packages end in "also" and their
+  names. Import-only changes and external modules are not listed. It is
+  one list at the top, not a regrouping of the change list: "Where this
+  lands" is the per-package view. Its labels and the change list's come
+  from one `delta.PackageLabels` over every package with a changed
+  definition; labelled a sentence at a time, `services/reading` read as
+  `reading` wherever `routers/reading` was not in the same sentence. A
+  doc is the author's text, not markup: it is HTML-escaped outside code
+  spans, and `@name`, `#123` and `!123` are broken with a zero-width space
+  so a docstring mentioning `@dataclass` pings nobody on every post.
+- **Every definition in "What it did" opens (14.1, like 10.3).** An item
+  that names a definition ("`_meta_title` in `reading`") is a collapsed
+  row, the same disclosure the call stacks use. Opened, it shows the
+  signature (a before/after diff when that changed), the definition's own
+  first sentence, how it is reached, and a permalink. "How it is reached"
+  is the route it handles, then who calls it by name, with the package
+  when it is another one, and tests counted apart. For a new helper, that
+  names the changed function that now depends on it. "Nothing calls it
+  yet" is said only of new code. Existing code with no recorded caller is
+  said to have none in the code, since a framework callback or a dynamic
+  call is the usual reason, not dead code. The narration sentences carry
+  the ID behind each item (`ItemIDs`) so the renderer can find it, and
+  "and N more" under open-able rows is a plain line, not a bullet among
+  disclosure triangles. Sentences about packages, imports and routes keep
+  their bullets.
 - **Counts name what they count.** `graph.DescribeKinds` turns counts per
   symbol kind into "3 functions and 1 type"; the note never says "symbols".
 - **Colliding package labels are widened (section 10).** Each package drawn

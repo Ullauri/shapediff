@@ -570,7 +570,7 @@ func stackBody(in NoteInput, ln filter.StackLine) string {
 		fmt.Fprintf(&b, "```\n%s\n```\n\n", oneLine(ln.Signature))
 	}
 	if ln.Doc != "" {
-		b.WriteString(htmlEsc(ln.Doc) + "\n\n")
+		b.WriteString(blockSafe(htmlEsc(ln.Doc)) + "\n\n")
 	}
 	if ln.Hidden > 0 {
 		fmt.Fprintf(&b, "Makes %d more %s that %s to no changed code; not listed.\n\n", ln.Hidden, plural(ln.Hidden, "call", "calls"), plural(ln.Hidden, "leads", "lead"))

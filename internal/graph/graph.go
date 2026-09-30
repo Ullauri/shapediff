@@ -424,6 +424,23 @@ func (ix *Index) Callees(id string) []*Edge {
 	return out
 }
 
+// CallerIDs returns the distinct nodes that call id, in ID order, without
+// id itself: a recursive call is not a caller, and parallel edges from one
+// caller count once. The note's "N callers" and the names it lists under a
+// definition both come from here, so they cannot disagree.
+func (ix *Index) CallerIDs(id string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, e := range ix.Callers(id) {
+		if e.From != id && !seen[e.From] {
+			seen[e.From] = true
+			out = append(out, e.From)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Callers returns the calls-edge sources of a node in ID order.
 func (ix *Index) Callers(id string) []*Edge {
 	var out []*Edge

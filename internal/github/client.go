@@ -66,8 +66,10 @@ func (c *Client) http() *http.Client {
 	return &http.Client{Timeout: 60 * time.Second}
 }
 
-// do performs one request against u (absolute), retrying once on a 5xx,
-// and decodes JSON into out when out is non-nil.
+// do performs one request against u (absolute), retrying once on a 5xx or
+// a transport error, and decodes JSON into out when out is non-nil. A POST
+// is never retried: when the first one was created and only its response
+// was lost, a retry would post a second comment.
 func (c *Client) do(ctx context.Context, method, u string, body any, out any) (*http.Response, error) {
 	var raw []byte
 	if body != nil {
@@ -80,8 +82,12 @@ func (c *Client) do(ctx context.Context, method, u string, body any, out any) (*
 	if p, err := url.Parse(u); err == nil {
 		path = p.Path
 	}
+	attempts := 2
+	if method == http.MethodPost {
+		attempts = 1
+	}
 	var last error
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt < attempts; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
@@ -159,20 +165,45 @@ func (c *Client) UpdateComment(ctx context.Context, r Repo, id int64, body strin
 	return &out, nil
 }
 
-// FindMarkedComment returns the first comment whose body starts with the
-// marker, or nil when there is none. Starts with, not contains: a reply
-// that quotes the note carries the marker too, behind "> ".
-func (c *Client) FindMarkedComment(ctx context.Context, r Repo, number int, marker string) (*Comment, error) {
+// FindMarkedComment returns the first comment by author whose body starts
+// with the marker, or nil when there is none. By author, because anyone
+// who can comment can write the marker: a stranger's comment taken for the
+// note would be edited under their name, or refuse the edit and keep the
+// real note from ever being posted. Starts with, not contains: a reply that
+// quotes the note carries the marker too, behind "> ".
+func (c *Client) FindMarkedComment(ctx context.Context, r Repo, number int, marker, author string) (*Comment, error) {
+	if author == "" {
+		return nil, fmt.Errorf("github: FindMarkedComment needs the author whose comment to look for")
+	}
 	comments, err := c.ListComments(ctx, r, number)
 	if err != nil {
 		return nil, err
 	}
 	for i := range comments {
-		if strings.HasPrefix(strings.TrimLeft(comments[i].Body, " \t\r\n"), marker) {
+		if strings.EqualFold(comments[i].User.Login, author) && strings.HasPrefix(strings.TrimLeft(comments[i].Body, " \t\r\n"), marker) {
 			return &comments[i], nil
 		}
 	}
 	return nil, nil
+}
+
+// ActionsBot is the login GITHUB_TOKEN comments as.
+const ActionsBot = "github-actions[bot]"
+
+// Login is the login the token acts as. GITHUB_TOKEN, an installation
+// token, cannot read /user and gets an error here; its comments are
+// ActionsBot's.
+func (c *Client) Login(ctx context.Context) (string, error) {
+	var u struct {
+		Login string `json:"login"`
+	}
+	if _, err := c.do(ctx, http.MethodGet, c.url("/user"), nil, &u); err != nil {
+		return "", err
+	}
+	if u.Login == "" {
+		return "", fmt.Errorf("github: /user has no login")
+	}
+	return u.Login, nil
 }
 
 // nextLink is the rel="next" URL of a Link header, or "".
@@ -191,45 +222,75 @@ func nextLink(h string) string {
 	return ""
 }
 
-// detailsOmitted replaces the note's closing Details section when the note
-// is over MaxBody.
+// detailsOmitted replaces the note's Details section when the note is over
+// MaxBody.
 const detailsOmitted = "\n_The details table is left out: GitHub caps a comment at 65,536 characters. The full delta is the job's artifact, `shapediff/delta.json`._\n"
 
-// Fit makes a note fit in one comment. The note's last section is the
-// collapsed Details table, which grows with the size of the change and is
-// the part a reader can most easily do without, so it goes first. A note
-// still over the limit is cut at a line boundary. It reports whether it
-// changed anything. Lengths are bytes, which is never less than GitHub's
-// character count.
+// cutShort ends a note that had to be cut.
+const cutShort = "\n\n_This note is cut short: GitHub caps a comment at 65,536 characters. The full delta is the job's artifact, `shapediff/delta.json`._\n"
+
+// Fit makes a note fit in one comment. The note's Details section, the
+// last collapsed block, grows with the size of the change and is the part a
+// reader can most easily do without, so it goes first; whatever follows it
+// (the weekly brief's link) is kept. A note still over the limit is cut at
+// a line boundary, with every code fence and <details> the cut left open
+// closed again, so the notice is not swallowed into a diagram or a
+// collapsed section. It reports whether it changed anything. Lengths are
+// bytes, which is never less than GitHub's character count.
 func Fit(body string) (string, bool) {
 	if len(body) <= MaxBody {
 		return body, false
 	}
-	if i := strings.LastIndex(body, "\n<details><summary>"); i >= 0 && strings.HasSuffix(strings.TrimRight(body, "\n"), "</details>") {
-		body = body[:i] + detailsOmitted
-		if len(body) <= MaxBody {
-			return body, true
+	trailer := ""
+	if s := strings.LastIndex(body, "\n<details><summary>Details"); s >= 0 {
+		if e := strings.LastIndex(body, "</details>"); e > s {
+			trailer = strings.TrimPrefix(body[e+len("</details>"):], "\n")
+			body = body[:s] + detailsOmitted + trailer
+			if len(body) <= MaxBody {
+				return body, true
+			}
+			body = body[:s]
 		}
 	}
-	const cut = "\n\n_This note is cut short: GitHub caps a comment at 65,536 characters. The full delta is the job's artifact, `shapediff/delta.json`._\n"
-	limit := MaxBody - len(cut) - len("\n```") // room for closeFences
-	if j := strings.LastIndex(body[:limit], "\n"); j > 0 {
-		limit = j
+	suffix := cutShort + trailer
+	limit := len(body)
+	for {
+		if limit > MaxBody {
+			limit = MaxBody
+		}
+		j := strings.LastIndex(body[:limit], "\n")
+		if j <= 0 {
+			j = limit
+		}
+		kept := closeOpen(body[:j])
+		if len(kept)+len(suffix) <= MaxBody || j == 0 {
+			return kept + suffix, true
+		}
+		limit = j - (len(kept) + len(suffix) - MaxBody)
+		if limit < 0 {
+			limit = 0
+		}
 	}
-	return closeFences(body[:limit]) + cut, true
 }
 
-// closeFences closes a code fence the cut left open, so the rest of the
-// comment is not swallowed into a diagram.
-func closeFences(s string) string {
-	open := false
+// closeOpen closes the code fence and the <details> elements a cut left
+// open. Tags inside a fence are diagram text, not markup.
+func closeOpen(s string) string {
+	fenced, open := false, 0
 	for _, line := range strings.Split(s, "\n") {
 		if strings.HasPrefix(line, "```") {
-			open = !open
+			fenced = !fenced
+			continue
+		}
+		if !fenced {
+			open += strings.Count(line, "<details>") + strings.Count(line, "<details ") - strings.Count(line, "</details>")
 		}
 	}
-	if open {
-		return s + "\n```"
+	if fenced {
+		s += "\n```"
+	}
+	for ; open > 0; open-- {
+		s += "\n</details>"
 	}
 	return s
 }

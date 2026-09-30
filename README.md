@@ -193,11 +193,16 @@ of the head, `SHAPEDIFF_TOKEN=$(gh auth token)`) and run `shapediff post
   The forge comes from the CI environment in `post`, and from `--forge`,
   else the `--project-url` host, in `render` and `query`. The note is found
   again by the marker at the start of a comment, not anywhere in one, since
-  a reply quoting the note carries it too.
+  a reply quoting the note carries it too, and only in a comment by the
+  token's own user (`github-actions[bot]` for `GITHUB_TOKEN`, which cannot
+  read `/user`; `SHAPEDIFF_COMMENT_AUTHOR` overrides), since anyone who can
+  comment can type the marker. When no merge base is found the fallback is
+  a line on the job's log, not in the note.
 - **GitHub's comment limit** is 65,536 characters; GitLab's note limit is
-  far above any note. A longer note loses its closing Details table first,
-  with a line pointing at the artifact, and is cut at a line boundary only
-  if that is not enough.
+  far above any note. A longer note loses its Details section first, with a
+  line pointing at the artifact, keeping the weekly link after it; only if
+  that is not enough is it cut at a line boundary, with the code fences and
+  `<details>` the cut left open closed again.
 - **Plug-in extractors in `post`** key the graph cache on a hash of the
   extractor command and of every file it names, the interpreter included,
   in place of the Go toolchain: the Python extractor's output differs
@@ -223,7 +228,8 @@ of the head, `SHAPEDIFF_TOKEN=$(gh auth token)`) and run `shapediff post
   built on, which has no graphviz.
 - **S3 cache** is not built; `dir:<path>` and the GitLab generic package
   registry are. On GitHub the directory cache persists through
-  `actions/cache`.
+  `actions/cache`, which scopes a pull request's cache to that pull
+  request: later pushes reuse it, other pull requests do not.
 - **Weekly SVG upload**: the page links the SVG the layout step wrote; the
   wiki attachment upload is not in the client.
 - **Pinned positions for the baseline map** (10.1) are not built: Mermaid

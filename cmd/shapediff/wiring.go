@@ -57,22 +57,37 @@ func (a notesAdapter) UpdateNote(ctx context.Context, iid, noteID int, body stri
 }
 
 // commentsAdapter is the GitHub side of pipeline.NotesAPI: the comments of
-// a pull request. It trims a note to GitHub's comment limit on the way out.
+// a pull request. It trims a note to GitHub's comment limit on the way out,
+// and only takes a comment for its note when the token's own user wrote it.
 type commentsAdapter struct {
 	c   *github.Client
 	r   github.Repo
 	log io.Writer
+	// author is whose comment is the note: SHAPEDIFF_COMMENT_AUTHOR, else
+	// the token's login, else GITHUB_TOKEN's bot. Resolved on first use.
+	author string
 }
 
-func (a commentsAdapter) FindMarkedNote(ctx context.Context, number int, marker string) (int, string, bool, error) {
-	c, err := a.c.FindMarkedComment(ctx, a.r, number, marker)
+func (a *commentsAdapter) whose(ctx context.Context) string {
+	if a.author == "" {
+		if login, err := a.c.Login(ctx); err == nil {
+			a.author = login
+		} else {
+			a.author = github.ActionsBot
+		}
+	}
+	return a.author
+}
+
+func (a *commentsAdapter) FindMarkedNote(ctx context.Context, number int, marker string) (int, string, bool, error) {
+	c, err := a.c.FindMarkedComment(ctx, a.r, number, marker, a.whose(ctx))
 	if err != nil || c == nil {
 		return 0, "", false, err
 	}
 	return int(c.ID), c.Body, true, nil
 }
 
-func (a commentsAdapter) fit(body string) string {
+func (a *commentsAdapter) fit(body string) string {
 	fitted, trimmed := github.Fit(body)
 	if trimmed {
 		fmt.Fprintf(a.log, "shapediff: note is %d bytes, over GitHub's %d; posted %d\n", len(body), github.MaxBody, len(fitted))
@@ -80,12 +95,12 @@ func (a commentsAdapter) fit(body string) string {
 	return fitted
 }
 
-func (a commentsAdapter) CreateNote(ctx context.Context, number int, body string) error {
+func (a *commentsAdapter) CreateNote(ctx context.Context, number int, body string) error {
 	_, err := a.c.CreateComment(ctx, a.r, number, a.fit(body))
 	return err
 }
 
-func (a commentsAdapter) UpdateNote(ctx context.Context, _ int, id int, body string) error {
+func (a *commentsAdapter) UpdateNote(ctx context.Context, _ int, id int, body string) error {
 	_, err := a.c.UpdateComment(ctx, a.r, int64(id), a.fit(body))
 	return err
 }
@@ -210,7 +225,7 @@ func deps(env pipeline.Env, cfg *config.Config, extractor string, log io.Writer)
 	}
 	switch {
 	case env.Forge == forge.GitHub && env.APIURL != "" && env.Token != "":
-		d.Notes = commentsAdapter{c: &github.Client{BaseURL: env.APIURL, Token: env.Token}, r: github.Repo(env.ProjectPath), log: log}
+		d.Notes = &commentsAdapter{c: &github.Client{BaseURL: env.APIURL, Token: env.Token}, r: github.Repo(env.ProjectPath), log: log, author: env.CommentAuthor}
 	case env.Forge == forge.GitHub:
 		fmt.Fprintln(log, "shapediff: no GITHUB_TOKEN or SHAPEDIFF_TOKEN; the comment will not be posted")
 	case client != nil:

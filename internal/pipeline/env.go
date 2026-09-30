@@ -30,6 +30,9 @@ type Env struct {
 	ProjectDir      string // CI_PROJECT_DIR
 	Token           string // SHAPEDIFF_TOKEN
 	CacheSpec       string // SHAPEDIFF_CACHE
+	// CommentAuthor is, on GitHub, the login whose comment is the note
+	// (SHAPEDIFF_COMMENT_AUTHOR); "" means the token's own. GitLab ignores it.
+	CommentAuthor string
 }
 
 // EnvFrom parses the CI variables from a lookup function (os.Getenv or a
@@ -110,6 +113,7 @@ func githubEnv(get func(string) string, read func(string) ([]byte, error)) Env {
 		ProjectDir:     get("GITHUB_WORKSPACE"),
 		Token:          token,
 		CacheSpec:      get("SHAPEDIFF_CACHE"),
+		CommentAuthor:  get("SHAPEDIFF_COMMENT_AUTHOR"),
 	}
 	if p := get("GITHUB_EVENT_PATH"); p != "" {
 		if b, err := read(p); err == nil {

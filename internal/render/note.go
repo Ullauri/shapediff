@@ -161,6 +161,7 @@ func writeSummary(b *strings.Builder, in NoteInput) {
 	if in.Suppression != "" {
 		fmt.Fprintf(b, "\n%s\n", in.Suppression)
 	}
+	writeTouches(b, in)
 	if len(in.Summary) > 0 {
 		b.WriteString("\n")
 		for _, s := range in.Summary {

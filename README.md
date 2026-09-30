@@ -165,6 +165,21 @@ of the head, `SHAPEDIFF_TOKEN=$(gh auth token)`) and run `shapediff post
   count with the names under it, which the note prints. The four standing
   counts that are zero share one line under the list. `narrate.Sentence`
   carries both forms; `cmd_render.go` picks one per sentence.
+- **What it touches (sections 6.1, 14.1).** "What changed" opens with
+  every package the change has code in, under the label the list below it
+  uses, with what the package is for, and only then says what the change
+  did to them: a reader cannot weigh "`_stamp` added in `reading`" without
+  knowing what `reading` is. The description is the package's own first
+  sentence, which both extractors now record on the package node. A
+  package without one gets a line built from the graph, in priority order:
+  the entry points registered in it, the tables it reads or writes (else
+  what it calls out to), who imports it, what it defines. At most two of
+  those, after an italic _no doc recorded_. Not "no docstring": a graph
+  cached before package docs were extracted has none either, and the line
+  must not claim the code lacks one. Import-only changes and external
+  modules are not listed; more than eight packages end in "and N more". It
+  is one list at the top, not a regrouping of the change list by package:
+  "Where this lands" is already the per-package view.
 - **Counts name what they count.** `graph.DescribeKinds` turns counts per
   symbol kind into "3 functions and 1 type"; the note never says "symbols".
 - **Colliding package labels are widened (section 10).** Each package drawn

@@ -10,7 +10,8 @@ no type checker behind it.
 
 What it maps (Python shape on the Go-shaped schema):
   package     one per module file; the import path is the file path without
-              ``.py`` (``backend/app/routers/pipelines``), ``__init__`` stripped
+              ``.py`` (``backend/app/routers/pipelines``), ``__init__`` stripped;
+              ``doc`` is the module docstring's first sentence
   symbol      top-level def -> func, class -> type, method -> ``Class.m``
               (method), module assignment -> var (UPPER_CASE -> const)
   entrypoint  FastAPI ``@router.<verb>("/path")`` -> ``entry:http:VERB
@@ -522,8 +523,12 @@ class Extractor:
                 self.packages[f"pkg:{m.pkg}"] = "failed"
                 continue
             self.packages[f"pkg:{m.pkg}"] = "ok"
-            self.add_node(f"pkg:{m.pkg}", kind="package", name=m.name, package=m.pkg,
-                          attrs={"exported": False, "generated": m.generated, "test": m.test})
+            pattrs = {"exported": False, "generated": m.generated, "test": m.test}
+            # the module docstring says what the module is for (section 6.1)
+            doc = synopsis(m.tree) if m.tree is not None else ""
+            if doc:
+                pattrs["doc"] = doc
+            self.add_node(f"pkg:{m.pkg}", kind="package", name=m.name, package=m.pkg, attrs=pattrs)
             for tgt in sorted(m.import_targets):
                 if tgt in r.modules:
                     tm = r.modules[tgt]

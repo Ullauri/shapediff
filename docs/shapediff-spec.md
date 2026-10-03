@@ -3,8 +3,7 @@
 Status: proposal, v0.5, 2026-09-24. Working name only. v0.1 (2026-09-20) is
 kept beside this file as `shapediff-spec.v0.1.md`; section 20 lists what
 changed and why, and what v0.3, v0.4 and v0.5 added on top. v0.5 is written
-on top of v0.4.1 and v0.4.2, which are on the unmerged branch
-`agent/diagram-legibility` (the catching-up reader of section 2, `weekly
+on top of v0.4.1 and v0.4.2 (the catching-up reader of section 2, `weekly
 --repo`); it cites those and does not restate them.
 
 This document is written to be reviewed. Every section that makes a design
@@ -1669,7 +1668,7 @@ could fix. The MRs were re-rendered before and after each change.
 - **Package labels that collide are widened** (section 10). Two packages
   called `pipelines` under different parents drew as two boxes with one name.
   Each drawn package now takes the shortest trailing path unique within its
-  diagram. This is the same defect the README records for the weekly page's
+  diagram. This is the same defect `implementation-notes.md` records for the weekly page's
   "Where change concentrated" table.
 
 The theme of the four above is that both defects came from a rule stated for

@@ -441,11 +441,12 @@ func definitions(d *delta.Delta, ix *graph.Index, what string, labels map[string
 
 // kindList is the list form of a set of definitions: the lead counts them
 // by kind ("3 functions and 1 type added"), and the items name them with
-// their package. Test code is counted apart and not named, since a
-// reviewer reads the list for what the MR changes in the program.
+// their package. Test code and generated code are counted apart and not
+// named, since a reviewer reads the list for what the MR changes in the
+// program, and the diagrams leave both out (section 9).
 func kindList(ids []string, ix *graph.Index, verb, tail string, labels map[string]string) (string, []string, []string) {
-	prog, tests := map[string]int{}, map[string]int{}
-	nTests := 0
+	prog, tests, gen := map[string]int{}, map[string]int{}, map[string]int{}
+	nTests, nGen := 0, 0
 	var named []string
 	for _, id := range ids {
 		var n *graph.Node
@@ -456,9 +457,14 @@ func kindList(ids []string, ix *graph.Index, verb, tail string, labels map[strin
 		if n != nil {
 			kind = n.Attrs.SymbolKind
 		}
-		if n != nil && n.Attrs.Test {
+		switch {
+		case n != nil && n.Attrs.Test:
 			tests[kind]++
 			nTests++
+			continue
+		case n != nil && n.Attrs.Generated:
+			gen[kind]++
+			nGen++
 			continue
 		}
 		prog[kind]++
@@ -466,15 +472,26 @@ func kindList(ids []string, ix *graph.Index, verb, tail string, labels map[strin
 	}
 	var lead string
 	switch {
-	case len(named) == 0:
+	case len(named) == 0 && nGen == 0:
 		lead = fmt.Sprintf("**%s %s in tests**", graph.DescribeKinds(tests, 0), verb)
+	case len(named) == 0 && nTests == 0:
+		lead = fmt.Sprintf("**%s %s in generated code**", graph.DescribeKinds(gen, 0), verb)
+	case len(named) == 0:
+		lead = fmt.Sprintf("**%s %s in tests, and %s in generated code**", graph.DescribeKinds(tests, 0), verb, graph.DescribeKinds(gen, 0))
 	default:
 		lead = fmt.Sprintf("**%s %s**", graph.DescribeKinds(prog, 0), verb)
 		if tail != "" {
 			lead += " " + tail
 		}
+		var apart []string
 		if nTests > 0 {
-			lead += fmt.Sprintf(", and %d in tests", nTests)
+			apart = append(apart, fmt.Sprintf("%d in tests", nTests))
+		}
+		if nGen > 0 {
+			apart = append(apart, fmt.Sprintf("%d generated", nGen))
+		}
+		if len(apart) > 0 {
+			lead += ", and " + strings.Join(apart, " and ")
 		}
 	}
 	if len(named) == 0 {

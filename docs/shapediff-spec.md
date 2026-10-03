@@ -549,8 +549,12 @@ Input: base graph, head graph. Output: one delta document.
 }
 ```
 
-`stats.structural` is false when the only changes are `body_changed`. It is
-the one bit the CI job reads to decide whether to post (section 14.1).
+`stats.structural` is false when the only changes are `body_changed`, or
+when every change is in test code or generated code: both are left out of
+what the note draws (section 9), and a note about nothing but a new test
+is one more empty note teaching reviewers to skip it. The changes are
+still listed in the delta. It is the one bit the CI job reads to decide
+whether to post (section 14.1).
 
 ### 8.1 Rename detection
 

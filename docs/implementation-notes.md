@@ -39,6 +39,12 @@ section.
 - **Structural when the head does not compile.** `stats.structural` is true
   whenever changes were hidden by suppression: a broken head cannot be
   called non-structural, and the headline says why.
+- **Structural over the program only.** A change whose every added,
+  removed, renamed or re-signed definition is a test or generated, and
+  whose every edge change starts in such code, is not structural: the
+  note never draws test or generated code, so there would be nothing to
+  show. The "What it did" list counts test and generated definitions
+  apart ("and 2 in tests and 7 generated") and names neither.
 - **Type signatures.** Interfaces carry their method set as the signature,
   so widening an interface is a signature change with callers; structs
   carry `struct`, so adding a field is not. Type parameters are positional

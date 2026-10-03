@@ -1105,7 +1105,50 @@ func (e *engine) stats() {
 	for _, sp := range d.Suppressed {
 		hidden += sp.HiddenAdditions + sp.HiddenRemovals
 	}
-	s.Structural = len(d.Nodes.Added)+len(d.Nodes.Removed)+s.SignaturesChanged+s.Renamed+
-		s.EdgesAdded+s.EdgesRemoved+s.EntrypointsAdded+s.EntrypointsRemoved+s.EntrypointsReachChanged > 0 ||
+	// Structural is decided over the program: a change confined to test
+	// code or generated code (sections 9 and 14.1 leave both out of what
+	// the note draws) is not a change to the shape a reviewer is shown,
+	// and a note about nothing but a new test teaches reviewers to skip
+	// the note. An edge counts when its origin is program code: a test
+	// calling an existing function changes no shape.
+	program := 0
+	for _, id := range d.Nodes.Added {
+		if e.isProgram(e.head, id) {
+			program++
+		}
+	}
+	for _, id := range d.Nodes.Removed {
+		if e.isProgram(e.base, id) {
+			program++
+		}
+	}
+	for _, sc := range d.Nodes.SignatureChanged {
+		if e.isProgram(e.head, sc.ID) {
+			program++
+		}
+	}
+	for _, r := range d.Nodes.Renamed {
+		if e.isProgram(e.head, r.To) {
+			program++
+		}
+	}
+	for _, ed := range d.Edges.Added {
+		if e.isProgram(e.head, ed.From) {
+			program++
+		}
+	}
+	for _, ed := range d.Edges.Removed {
+		if e.isProgram(e.base, ed.From) {
+			program++
+		}
+	}
+	s.Structural = program+s.EntrypointsAdded+s.EntrypointsRemoved+s.EntrypointsReachChanged > 0 ||
 		hidden > 0 // a head that does not compile cannot be called non-structural
+}
+
+// isProgram reports whether a node is program code: present, and neither
+// a test definition nor generated.
+func (e *engine) isProgram(ix *graph.Index, id string) bool {
+	n := ix.Nodes[id]
+	return n != nil && !n.Attrs.Test && !n.Attrs.Generated
 }

@@ -44,11 +44,14 @@ shapediff:
     - shapediff post
   artifacts:
     # Always published, structural or not, so a reader (or an agent reviewer)
-    # can tell "nothing structural" from "the job did not run".
+    # can tell "nothing structural" from "the job did not run": delta.json
+    # carries an outcome field, and note.md is the note the job posted or
+    # would have posted.
     when: always
     expire_in: 90 days
     paths:
       - shapediff/delta.json
+      - shapediff/note.md
   # The job must never block a pipeline (spec 14.1 failure mode). `post`
   # already exits 0 on every runtime failure; this covers the image itself.
   allow_failure: true

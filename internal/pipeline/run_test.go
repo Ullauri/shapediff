@@ -248,3 +248,86 @@ func TestEmptyHeadIsAnExtractionFailure(t *testing.T) {
 		t.Fatalf("empty delta artifact: %v %+v", err, ed)
 	}
 }
+
+func TestDryRunRendersAndSaysWhatItWouldDo(t *testing.T) {
+	dir := t.TempDir()
+	notes := &fakeNotes{notes: map[int]string{}}
+	dp, _ := deps(t, true, notes)
+	dp.DryRun = true
+	var log bytes.Buffer
+	dp.Log = &log
+	out, err := Run(context.Background(), env(dir), dp)
+	if err != nil || !out.DryRun || !out.Posted || out.Updated || notes.created != 0 {
+		t.Fatalf("dry run should report a would-be post and post nothing: %+v %v created=%d", out, err, notes.created)
+	}
+	b, rerr := os.ReadFile(filepath.Join(dir, NotePath))
+	if rerr != nil || !bytes.HasPrefix(b, []byte(Marker+"\nNOTE")) || out.Note == "" {
+		t.Fatalf("the note must be written on a dry run: %v %q %+v", rerr, b, out)
+	}
+	if !bytes.Contains(log.Bytes(), []byte("would create")) {
+		t.Fatalf("log = %q", log.String())
+	}
+	// With an existing note the dry run reports an update, and the real
+	// API is only read.
+	notes.notes[7] = Marker + "\nold"
+	out, _ = Run(context.Background(), env(dir), dp)
+	if !out.Updated || out.Posted || notes.updated != 0 || notes.notes[7] != Marker+"\nold" {
+		t.Fatalf("%+v updated=%d", out, notes.updated)
+	}
+	// And without any token at all the note is still rendered.
+	dp.Notes = nil
+	out, _ = Run(context.Background(), env(dir), dp)
+	if out.Note == "" || !out.Posted {
+		t.Fatalf("no token: %+v", out)
+	}
+}
+
+func TestNoteIsWrittenBesideTheDelta(t *testing.T) {
+	dir := t.TempDir()
+	notes := &fakeNotes{notes: map[int]string{}}
+	dp, _ := deps(t, true, notes)
+	out, _ := Run(context.Background(), env(dir), dp)
+	if out.Note != filepath.Join(dir, NotePath) {
+		t.Fatalf("note path = %q", out.Note)
+	}
+	if ed, err := delta.ReadFile(out.Artifact); err != nil || ed.Outcome != delta.OutcomeOK {
+		t.Fatalf("artifact outcome: %v %+v", err, ed)
+	}
+	// A token that cannot comment still leaves the note behind.
+	dp.Notes = nil
+	out, _ = Run(context.Background(), env(dir), dp)
+	if out.Note == "" || out.Posted {
+		t.Fatalf("no token: %+v", out)
+	}
+	// Non-structural: the one-liner, so the artifact set is always whole.
+	dp, _ = deps(t, false, notes)
+	out, _ = Run(context.Background(), env(dir), dp)
+	if b, err := os.ReadFile(out.Note); err != nil || string(b) != Marker+"\nno structural change at head000000000000" {
+		t.Fatalf("non-structural note: %v %q", err, b)
+	}
+}
+
+func TestFailureArtifactSaysFailed(t *testing.T) {
+	dir := t.TempDir()
+	e := env(dir)
+	e.DiffBaseSHA = ""
+	dp, _ := deps(t, true, &fakeNotes{notes: map[int]string{}})
+	out, err := Run(context.Background(), e, dp)
+	if err != nil || out.Warning == "" || out.Artifact == "" {
+		t.Fatalf("a missing SHA must still leave an artifact: %+v %v", out, err)
+	}
+	ed, err := delta.ReadFile(out.Artifact)
+	if err != nil || ed.Outcome != delta.OutcomeFailed || ed.Reason == "" || ed.HeadSHA != "head000000000000" {
+		t.Fatalf("%v %+v", err, ed)
+	}
+	dp.Extract = func(context.Context, string, string) (*graph.Document, error) {
+		return nil, errors.New("go build failed")
+	}
+	out, _ = Run(context.Background(), env(dir), dp)
+	if ed, err := delta.ReadFile(out.Artifact); err != nil || ed.Outcome != delta.OutcomeFailed || !bytes.Contains([]byte(ed.Reason), []byte("extraction failed")) {
+		t.Fatalf("%v %+v", err, ed)
+	}
+	if b, err := os.ReadFile(out.Note); err != nil || !bytes.Contains(b, []byte("extraction failed")) {
+		t.Fatalf("the note artifact should carry the failure line: %v %q", err, b)
+	}
+}

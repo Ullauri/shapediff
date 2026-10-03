@@ -544,6 +544,7 @@ Input: base graph, head graph. Output: one delta document.
   },
   "suppressed": [ { "package": "pkg:...", "base": "ok", "head": "partial", "hidden_removals": 14 } ],
   "stats": { "entrypoints_added": 1, "entrypoints_reach_changed": 2, "symbols_added": 7, "structural": true, ... },
+  "outcome": "ok",                     // set by the CI job: ok, or failed with a reason (section 14.1)
   "warnings": []
 }
 ```
@@ -1289,7 +1290,14 @@ branch-only pipelines never fire that event. Steps:
    as a job artifact (`shapediff/delta.json`) and write it to the cache
    under `(repo, mr_iid, head_sha)` for the weekly job (section 8.3). The
    artifact is what lets a reader, or an agent, tell "nothing structural"
-   from "the job did not run".
+   from "the job did not run": its `outcome` is `ok` when the delta was
+   computed and `failed`, with a `reason`, when the job ended before one
+   existed, and it is written on every exit of the job, a missing SHA or
+   a bad cache setting included, so a missing artifact means the job never
+   ran. The note that was posted, or would have been, is written beside it
+   as `shapediff/note.md` whenever the job got as far as rendering one.
+   `--dry-run` does everything but post, and reports whether the note
+   would have been created or updated.
 5. **Post a note only when `stats.structural` is true.** One MR note
    carrying a marker (`<!-- shapediff:v1 -->`), updated on every push,
    never duplicated. If a note already exists and a later push removed all
@@ -1328,7 +1336,8 @@ Note layout, top to bottom:
 
 Failure mode: if extraction fails outright on either SHA, post the warning
 in one line (only if a note already exists; otherwise the artifact carries
-it) and exit 0. The job must never block a pipeline.
+it, as its `outcome` and `reason`) and exit 0. The job must never block a
+pipeline.
 
 ### 14.2 Weekly
 

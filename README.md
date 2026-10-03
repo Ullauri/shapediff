@@ -124,9 +124,11 @@ of adding a new one. Only the per-PR job runs on GitHub. The weekly job
 needs GitLab, because it lists merged MRs and writes a wiki page.
 
 Either way, the job never blocks a merge. `post` exits 0 on every runtime
-failure, and it always publishes the delta as a job artifact, so a person or
-an automated reviewer can tell "nothing structural" apart from "did not
-run".
+failure, and it always publishes the delta as a job artifact, with an
+`outcome` field (`ok` or `failed`, with the reason) so a person or an
+automated reviewer can tell "nothing structural" apart from "did not
+run". The note it posted, or would have posted, is published beside it as
+`shapediff/note.md`.
 
 You can also run the GitHub job by hand against any pull request. Set the
 variables Actions would set:
@@ -138,8 +140,11 @@ variables Actions would set:
 - `GITHUB_WORKSPACE`: a checkout of the head
 - `SHAPEDIFF_TOKEN=$(gh auth token)`
 
-Then run `shapediff post --dry-run` first. Without `--dry-run`, the comment
-is posted as the user who owns the token.
+Then run `shapediff post --dry-run` first: it does everything but post,
+writes the note it would post to `shapediff/note.md` and the delta to
+`shapediff/delta.json`, and says whether the comment would be created or
+updated. Without `--dry-run`, the comment is posted as the user who owns
+the token.
 
 ## Configuration
 

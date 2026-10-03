@@ -199,7 +199,7 @@ func deps(env pipeline.Env, cfg *config.Config, extractor string, log io.Writer)
 	}
 	store, err := cache.FromEnv(cache.EnvSpec{Value: env.CacheSpec, ProjectDir: repoDir, Client: client, Project: projectOf(env)})
 	if err != nil {
-		return pipeline.Deps{}, fmt.Errorf("cache: %w", err)
+		return pipeline.Deps{}, err // already says "cache:"
 	}
 	extract, kp := extractFn(cfg, repo), keyParts(ctx, cfg, repoDir)
 	if extractor != "" {

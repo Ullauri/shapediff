@@ -312,12 +312,12 @@ func weeklyDeps(reposFile string, dryRun bool) (weeklyDepsT, error) {
 	// one config and key set per run: the weekly job uses each repo's own
 	// .shapediff.yml for extraction but the wiki job's defaults for budgets
 	first := f.Repos[0]
-	cfg, err := config.LoadRepo(first.Dir)
+	cfg, err := loadRepoConfig(first.Dir)
 	if err != nil {
 		cfg = config.Default()
 	}
 	wd.Extract = func(ctx context.Context, repoDir, sha string) (*graph.Document, error) {
-		rc, err := config.LoadRepo(repoDir)
+		rc, err := loadRepoConfig(repoDir)
 		if err != nil {
 			rc = config.Default()
 		}
@@ -361,7 +361,7 @@ func weeklyLocalDeps(repoDir, branch, extractor string) (weeklyDepsT, error) {
 			return weeklyDepsT{}, err
 		}
 	}
-	cfg, err := config.LoadRepo(dir)
+	cfg, err := loadRepoConfig(dir)
 	if err != nil {
 		cfg = config.Default()
 	}

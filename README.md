@@ -144,11 +144,21 @@ is posted as the user who owns the token.
 ## Configuration
 
 Every field is optional. [`.shapediff.example.yml`](.shapediff.example.yml)
-shows the defaults: module roots for monorepos, ignore globs, extra
-entry-point and sink patterns, the diagram budget, and narration. Narration
-is `template` by default. Setting it to `llm` sends the template sentences
-through any OpenAI-compatible endpoint, and a validator rejects any sentence
-that is not backed by the delta. Spec section 13 documents each field.
+shows every field at its default: module roots for monorepos, ignore globs,
+extra entry-point and sink patterns, the diagram budget, and narration. A
+key the config does not have is an error, so a misspelled key cannot pass
+for an omitted one. `extract`, `delta`, `render` and `post` all read
+`.shapediff.yml` from the repo root (`--config` overrides), so a note
+rendered locally matches the one CI posts. Spec section 13 documents each
+field.
+
+Narration is `template` by default. Setting it to `llm` sends the template
+sentences through an OpenAI-compatible endpoint, and a validator rejects
+any sentence that is not backed by the delta. The endpoint is configured
+by the CI environment, never by the repo: `SHAPEDIFF_LLM_ENDPOINT` (an
+https URL, or http on the CI host itself), `SHAPEDIFF_LLM_MODEL` and
+`SHAPEDIFF_LLM_KEY`. A repo config travels with the change under review,
+so it must not be able to choose where a CI secret is sent.
 
 ## Commands
 

@@ -1168,7 +1168,12 @@ only under validators enforced after generation, not by prompting:
   paragraph is never shorter than the template.
 
 Backend for the rewrite: any OpenAI-compatible endpoint, configured per
-instance. A local model on the CI host is acceptable; the input is
+instance through the CI environment (`SHAPEDIFF_LLM_ENDPOINT`,
+`SHAPEDIFF_LLM_MODEL`, `SHAPEDIFF_LLM_KEY`) and never through the repo
+config: `.shapediff.yml` is part of the change under review, and a change
+must not be able to name the server a CI secret is sent to, nor which
+variable holds that secret. The endpoint must be https, or http on the CI
+host itself. A local model on the CI host is acceptable; the input is
 structured and small. The rewrite is offered the first eight template
 sentences; any past the eighth stay as the template wrote them. Phase 4's gate is an A/B against the template: if
 reviewers do not prefer the rewrite, the LLM, its endpoint and its
@@ -1231,7 +1236,12 @@ baseline: on                    # on | off; the "Where this lands" section, 10.1
 ```
 
 The loaded config, with defaults applied, is hashed into
-`extractor.config_hash` and so into the cache key.
+`extractor.config_hash` and so into the cache key. A key the config does
+not have is a load error that names the key and the closest one it does
+have, so a misspelled key cannot pass for an omitted one; `components` is
+not implemented yet and is rejected like any other unknown key until it
+is. An `llm` section is accepted for compatibility and ignored with a
+warning: the rewrite backend is configured by the environment (section 11).
 
 `components` is the one key left out of `extractor.config_hash`. It changes
 nothing in a graph, it will be edited often while a team settles its map,

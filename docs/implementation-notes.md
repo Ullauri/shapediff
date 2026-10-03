@@ -190,7 +190,10 @@ section.
   through the suite, and the twelve scenarios are named language-neutrally
   so a second language supplies its own `conformance/<lang>/`.
 - **Phase 4 (LLM rewrite)** has the claim validator and an
-  OpenAI-compatible client; with `narration: llm` and no endpoint the
+  OpenAI-compatible client. The endpoint, model and key come from
+  `SHAPEDIFF_LLM_ENDPOINT`, `SHAPEDIFF_LLM_MODEL` and `SHAPEDIFF_LLM_KEY`
+  in the CI environment, never from the repo config, which the change
+  under review controls; with `narration: llm` and no endpoint the
   template is used with a warning. Nothing makes a live call in tests.
 - **Graphviz** is used for the per-MR SVG fallback and the weekly pinned
   layout. When `dot`/`neato` are absent the `.dot` source is written and a

@@ -43,7 +43,7 @@ func runPost(args []string) error {
 	if note != "" {
 		fmt.Fprintln(os.Stderr, note)
 	}
-	cfg, err := config.LoadRepo(env.ProjectDir)
+	cfg, err := loadRepoConfig(env.ProjectDir)
 	if err != nil {
 		// A broken config must not fail the pipeline either; say so and run with defaults.
 		fmt.Fprintf(os.Stderr, "shapediff post: %v; using defaults\n", err)

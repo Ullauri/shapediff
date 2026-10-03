@@ -42,7 +42,7 @@ func runQuery(args []string) error {
 	}
 	cfg := config.Default()
 	if *cfgPath != "" {
-		if cfg, err = config.Load(*cfgPath); err != nil {
+		if cfg, err = loadConfig(*cfgPath); err != nil {
 			return err
 		}
 	}

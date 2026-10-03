@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/Ullauri/shapediff/internal/config"
@@ -19,7 +20,7 @@ func runDelta(args []string) error {
 	basePath := fs.String("base", "", "base graph (required)")
 	headPath := fs.String("head", "", "head graph (required)")
 	repoDir := fs.String("repo", "", "checkout for git rename detection (optional)")
-	cfgPath := fs.String("config", "", "repo config for narrow_targets (optional)")
+	cfgPath := fs.String("config", "", "repo config for narrow_targets (default <--repo>/.shapediff.yml, else ./.shapediff.yml, when present)")
 	mrIID := fs.Int("mr-iid", 0, "merge request iid to record")
 	out := fs.String("o", "", "output file (default stdout)")
 	if err := parseFlags(fs, args); err != nil {
@@ -36,11 +37,18 @@ func runDelta(args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg := config.Default()
-	if *cfgPath != "" {
-		if cfg, err = config.Load(*cfgPath); err != nil {
-			return err
+	if *cfgPath == "" {
+		// The same file post reads: a local delta should not differ from
+		// the one CI computes because a flag was left off.
+		dir := *repoDir
+		if dir == "" {
+			dir = "."
 		}
+		*cfgPath = filepath.Join(dir, config.FileName)
+	}
+	cfg, err := loadConfig(*cfgPath)
+	if err != nil {
+		return err
 	}
 	opts := delta.Options{NarrowTargets: cfg.NarrowTargets, MRIID: *mrIID}
 	if *repoDir != "" {

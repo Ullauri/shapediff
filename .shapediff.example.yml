@@ -1,27 +1,28 @@
-# .shapediff.yml: repo configuration (spec section 13). Every field is
-# optional; this file shows the defaults and the shape of the pattern lists.
-modules: ["."]                  # module roots for monorepos; one graph per module, merged
-build_tags: []
-ignore: ["**/mocks/**", "**/testdata/**"]
-entrypoints:
-  worker:
-    - call: "github.com/acme/jobs.Register"   # any (name literal, handler) registration
-  cron:
-    - call: "github.com/acme/sched.Every"
-sinks:
-  http_client:
-    - package: "github.com/acme/svc/internal/paymentsclient"
-  db:
-    - package: "github.com/acme/svc/internal/db"
+# .shapediff.yml: per-repo configuration (spec section 13). Every key is
+# optional, and this file shows each one at its default, so copying it as is
+# changes nothing. A key that is not listed here is an error, so a typo
+# cannot pass for an omission.
+modules: ["."]                  # module roots to extract, relative to the repo root; one graph per module, merged
+build_tags: []                  # extra Go build tags for the extractor
+ignore: ["**/mocks/**", "**/testdata/**"]   # path globs whose definitions are left out of the graph
+entrypoints: {}                 # extra entry-point registrations by kind (worker, cron), for example:
+#  worker:
+#    - call: "github.com/acme/jobs.Register"   # any call with (name literal, handler) arguments
+#  cron:
+#    - call: "github.com/acme/sched.Every"
+sinks: {}                       # extra sink packages by kind (db, queue, http_client, cache), for example:
+#  http_client:
+#    - package: "github.com/acme/svc/internal/paymentsclient"
+#  db:
+#    - package: "github.com/acme/svc/internal/db"
 budget:
-  chars: 1800                   # S; set from the instance's Mermaid limit measured in the spike
-  nodes: 24                     # B
-  edges: 36                     # E, default 1.5 x B
-narrow_targets: 2               # k, section 7.4
-narration: template             # template | llm | off
-weekly_url: ""                  # the weekly structure brief (section 14.2); shown to a
-                                # reader who is behind on the repo, not just on this MR
-llm:                            # only read when narration is llm
-  endpoint: ""                  # any OpenAI-compatible chat completions URL
-  model: ""
-  api_key_env: SHAPEDIFF_LLM_KEY
+  chars: 1800                   # Mermaid source per diagram; the forge stops rendering a diagram above its limit
+  nodes: 24                     # boxes per diagram
+  edges: 36                     # arrows per diagram; default 1.5 x nodes
+narrow_targets: 2               # a call with more possible targets than this is "wide" and not followed (spec 7.4)
+narration: template             # template | llm | off. llm rewrites the template sentences through the
+                                # OpenAI-compatible endpoint named by SHAPEDIFF_LLM_ENDPOINT in the CI
+                                # environment (with SHAPEDIFF_LLM_MODEL and SHAPEDIFF_LLM_KEY); the
+                                # endpoint and key are never read from this file
+baseline: on                    # on | off: the "Where this lands" package map (spec 10.1)
+weekly_url: ""                  # the weekly structure brief (spec 14.2); when set, the note ends with a link to it

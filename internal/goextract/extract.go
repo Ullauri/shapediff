@@ -45,6 +45,11 @@ type Options struct {
 	Version   string         // extractor version
 	Config    *config.Config // loaded repo config; nil means defaults
 	Env       []string       // extra environment for the go command
+	// Siblings are the module paths of the other roots in Config.Modules.
+	// An import of, or a call into, one of their packages is recorded
+	// against that package or symbol by ID, not collapsed to a module node:
+	// ExtractAll merges the documents, and the ID resolves there.
+	Siblings []string
 }
 
 type edgeAcc struct {
@@ -68,6 +73,11 @@ type extractor struct {
 	testVar map[string]*packages.Package // import path -> "[p.test]" variant
 	status  map[string]string            // import path -> load status
 	extMods map[string]bool
+	// siblings is Options.Siblings; crossModule holds the IDs of sibling
+	// packages and symbols that edges here point at, which document keeps
+	// although no node of that ID exists in this module.
+	siblings    map[string]bool
+	crossModule map[string]bool
 
 	nodes    map[string]*graph.Node
 	edges    map[graph.EdgeKey]*edgeAcc
@@ -94,27 +104,42 @@ func Extract(ctx context.Context, opts Options) (*graph.Document, error) {
 		opts.Version = "dev"
 	}
 	x := &extractor{
-		opts:       opts,
-		cfg:        opts.Config,
-		ignore:     newGlobMatcher(opts.Config.Ignore),
-		primary:    map[string]*packages.Package{},
-		testVar:    map[string]*packages.Package{},
-		status:     map[string]string{},
-		extMods:    map[string]bool{},
-		nodes:      map[string]*graph.Node{},
-		edges:      map[graph.EdgeKey]*edgeAcc{},
-		funcIDs:    map[*types.Func]string{},
-		sqlc:       map[string]sqlcInfo{},
-		files:      map[string][]byte{},
-		httpPats:   buildHTTPPatterns(),
-		workerPats: buildWorkerPatterns(opts.Config),
-		cronPats:   buildCronPatterns(opts.Config),
-		sinkPkgs:   buildSinkPackages(opts.Config),
+		opts:        opts,
+		cfg:         opts.Config,
+		ignore:      newGlobMatcher(opts.Config.Ignore),
+		primary:     map[string]*packages.Package{},
+		testVar:     map[string]*packages.Package{},
+		status:      map[string]string{},
+		extMods:     map[string]bool{},
+		siblings:    map[string]bool{},
+		crossModule: map[string]bool{},
+		nodes:       map[string]*graph.Node{},
+		edges:       map[graph.EdgeKey]*edgeAcc{},
+		funcIDs:     map[*types.Func]string{},
+		sqlc:        map[string]sqlcInfo{},
+		files:       map[string][]byte{},
+		httpPats:    buildHTTPPatterns(),
+		workerPats:  buildWorkerPatterns(opts.Config),
+		cronPats:    buildCronPatterns(opts.Config),
+		sinkPkgs:    buildSinkPackages(opts.Config),
+	}
+	for _, s := range opts.Siblings {
+		x.siblings[s] = true
 	}
 	if err := x.load(ctx); err != nil {
 		return nil, err
 	}
 	x.classify()
+	if len(x.primary) == 0 {
+		// packages.Load answers a directory with no go.mod with one error
+		// package that belongs to no module, and a module with no Go files
+		// with nothing at all. Neither is a graph.
+		detail := ""
+		if len(x.pkgs) > 0 && len(x.pkgs[0].Errors) > 0 {
+			detail = ": " + strings.TrimSpace(x.pkgs[0].Errors[0].Msg)
+		}
+		return nil, fmt.Errorf("%w under %s%s; a repo in another language needs --extractor (SHAPEDIFF_EXTRACTOR in CI)", graph.ErrNoPackages, x.moduleDir(), detail)
+	}
 	x.astPass()
 	x.ssaPass()
 	x.importEdges()
@@ -150,7 +175,7 @@ func (x *extractor) load(ctx context.Context) error {
 		return fmt.Errorf("load packages: %w", err)
 	}
 	if len(pkgs) == 0 {
-		return fmt.Errorf("no packages under %s", x.moduleDir())
+		return fmt.Errorf("%w under %s: no Go files in the module; a repo in another language needs --extractor (SHAPEDIFF_EXTRACTOR in CI)", graph.ErrNoPackages, x.moduleDir())
 	}
 	x.pkgs = pkgs
 	x.fset = pkgs[0].Fset
@@ -197,6 +222,17 @@ func loadStatus(p *packages.Package) string {
 }
 
 func (x *extractor) isLocal(path string) bool { _, ok := x.primary[path]; return ok }
+
+// isSibling reports whether a package belongs to another module root of
+// the same repo (Options.Siblings).
+func (x *extractor) isSibling(path string) bool {
+	for mod := range x.siblings {
+		if path == mod || strings.HasPrefix(path, mod+"/") {
+			return true
+		}
+	}
+	return false
+}
 
 func (x *extractor) relPath(filename string) string {
 	rel, err := filepath.Rel(x.opts.RepoDir, filename)
@@ -680,11 +716,20 @@ func (x *extractor) callSite(callerID string, call ssa.CallInstruction, siteCall
 	var external []*ssa.Function
 	for _, c := range raw {
 		for _, d := range x.resolveDeclared(c, cg, 0) {
-			if d.Pkg != nil && x.isLocal(d.Pkg.Pkg.Path()) {
+			switch {
+			case d.Pkg != nil && x.isLocal(d.Pkg.Pkg.Path()):
 				if obj, ok := d.Object().(*types.Func); ok {
 					declared[x.idForFuncObj(obj)] = d
 				}
-			} else if d.Object() != nil {
+			case d.Pkg != nil && x.isSibling(d.Pkg.Pkg.Path()):
+				// a callee in another module of this repo: the ID grammar
+				// is the same there, so the edge resolves once merged
+				if obj, ok := d.Object().(*types.Func); ok {
+					id := x.idForFuncObj(obj)
+					declared[id] = d
+					x.crossModule[id] = true
+				}
+			case d.Object() != nil:
 				external = append(external, d)
 			}
 		}
@@ -707,7 +752,7 @@ func (x *extractor) callSite(callerID string, call ssa.CallInstruction, siteCall
 
 	ids := make([]string, 0, len(declared))
 	for id := range declared {
-		if _, ok := x.nodes[id]; ok {
+		if _, ok := x.nodes[id]; ok || x.crossModule[id] {
 			ids = append(ids, id)
 		}
 	}
@@ -1068,6 +1113,11 @@ func (x *extractor) importEdges() {
 			switch {
 			case x.isLocal(imp.PkgPath):
 				to = graph.PkgID(imp.PkgPath)
+			case x.isSibling(imp.PkgPath):
+				// another module of this repo: the package itself, which the
+				// merged document holds, not a stand-in for the module
+				to = graph.PkgID(imp.PkgPath)
+				x.crossModule[to] = true
 			case imp.Module != nil && !imp.Module.Main:
 				to = graph.PkgID(imp.Module.Path)
 				if !x.extMods[imp.Module.Path] {
@@ -1184,6 +1234,15 @@ func Toolchain(ctx context.Context, dir string, extraEnv []string) (string, erro
 // ExtractAll extracts every module root listed in the config and merges
 // the documents into one (spec 7.5: one graph per module, joined here so
 // the delta engine sees the repo whole; import paths keep IDs disjoint).
+//
+// Each module is extracted knowing the others' module paths, so an import
+// of, or a call into, a sibling module lands on that package or symbol by
+// ID instead of collapsing to a module node. A package can still be
+// described twice, as the real thing by its own module and as an external
+// stand-in by a module that imports it through a nested path, and then
+// the module that owns the import path wins. The merged document is
+// validated: the built-in extractor is held to the same invariants as a
+// plug-in, and an invalid graph is an error, not a note.
 func ExtractAll(ctx context.Context, opts Options) (*graph.Document, error) {
 	if opts.Config == nil {
 		opts.Config = config.Default()
@@ -1192,10 +1251,21 @@ func ExtractAll(ctx context.Context, opts Options) (*graph.Document, error) {
 	if len(mods) == 0 {
 		mods = []string{"."}
 	}
+	paths := make([]string, len(mods))
+	for i, m := range mods {
+		paths[i] = modulePath(filepath.Join(opts.RepoDir, m))
+	}
+	m := merger{owner: map[string]string{}, pkgs: map[string]graph.Package{}, nodes: map[string]graph.Node{}, edges: map[graph.EdgeKey]bool{}}
 	var merged *graph.Document
-	for _, m := range mods {
+	var failed []string
+	for i, mod := range mods {
 		o := opts
-		o.ModuleDir = m
+		o.ModuleDir = mod
+		for j, p := range paths {
+			if j != i && p != "" {
+				o.Siblings = append(o.Siblings, p)
+			}
+		}
 		doc, err := Extract(ctx, o)
 		if err != nil {
 			if len(mods) == 1 {
@@ -1204,20 +1274,123 @@ func ExtractAll(ctx context.Context, opts Options) (*graph.Document, error) {
 			if merged == nil {
 				merged = emptyDocument(ctx, o)
 			}
-			merged.Warnings = append(merged.Warnings, fmt.Sprintf("module %s: %v", m, err))
+			merged.Warnings = append(merged.Warnings, fmt.Sprintf("module %s: %v", mod, err))
+			failed = append(failed, mod)
 			continue
 		}
 		if merged == nil {
 			merged = doc
-			continue
+		} else {
+			merged.Warnings = append(merged.Warnings, doc.Warnings...)
 		}
-		merged.Packages = append(merged.Packages, doc.Packages...)
-		merged.Nodes = append(merged.Nodes, doc.Nodes...)
-		merged.Edges = append(merged.Edges, doc.Edges...)
-		merged.Warnings = append(merged.Warnings, doc.Warnings...)
+		m.add(doc, paths[i])
+	}
+	if len(mods) > 1 {
+		merged.Packages, merged.Nodes, merged.Edges = m.result()
+		if dropped := m.dropped; dropped > 0 {
+			merged.Warnings = append(merged.Warnings, fmt.Sprintf("%d edges into modules that did not extract (%s) were dropped", dropped, strings.Join(failed, ", ")))
+		}
 	}
 	merged.Canonicalize()
+	if len(merged.Packages) == 0 {
+		return nil, fmt.Errorf("%w in any of the modules %v: %s", graph.ErrNoPackages, mods, strings.Join(merged.Warnings, "; "))
+	}
+	if probs := graph.Validate(merged); len(probs) > 0 {
+		if len(probs) > 10 {
+			probs = append(probs[:10], fmt.Sprintf("and %d more", len(probs)-10))
+		}
+		return nil, fmt.Errorf("extractor output violates the schema:\n  %s", strings.Join(probs, "\n  "))
+	}
 	return merged, nil
+}
+
+// modulePath is the module directive of the go.mod in dir, or "" when
+// there is none to read.
+func modulePath(dir string) string {
+	b, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if rest, ok := strings.CutPrefix(line, "module "); ok {
+			return strings.Trim(strings.TrimSpace(rest), `"`)
+		}
+	}
+	return ""
+}
+
+// merger joins the documents of a multi-module extraction by ID. A
+// package or node described by two modules is kept from the module that
+// owns its import path (the longest module path that prefixes it); an
+// edge whose endpoint no module produced is dropped and counted.
+type merger struct {
+	owner   map[string]string // id -> module path it was kept from
+	pkgs    map[string]graph.Package
+	nodes   map[string]graph.Node
+	edges   map[graph.EdgeKey]bool
+	order   []graph.Edge
+	dropped int
+}
+
+func owns(mod, pkgPath string) bool {
+	return mod != "" && (pkgPath == mod || strings.HasPrefix(pkgPath, mod+"/"))
+}
+
+func (m *merger) keep(id, pkgPath, mod string) bool {
+	old, seen := m.owner[id]
+	if !seen {
+		m.owner[id] = mod
+		return true
+	}
+	if owns(mod, pkgPath) && (!owns(old, pkgPath) || len(mod) > len(old)) {
+		m.owner[id] = mod
+		return true
+	}
+	return false
+}
+
+func (m *merger) add(doc *graph.Document, mod string) {
+	for _, p := range doc.Packages {
+		if m.keep("package:"+p.ID, strings.TrimPrefix(p.ID, "pkg:"), mod) {
+			m.pkgs[p.ID] = p
+		}
+	}
+	for _, n := range doc.Nodes {
+		if m.keep("node:"+n.ID, n.Package, mod) {
+			m.nodes[n.ID] = n
+		}
+	}
+	for _, e := range doc.Edges {
+		if k := e.Key(); !m.edges[k] {
+			m.edges[k] = true
+			m.order = append(m.order, e)
+		}
+	}
+}
+
+func (m *merger) result() ([]graph.Package, []graph.Node, []graph.Edge) {
+	pkgs := make([]graph.Package, 0, len(m.pkgs))
+	for _, p := range m.pkgs {
+		pkgs = append(pkgs, p)
+	}
+	nodes := make([]graph.Node, 0, len(m.nodes))
+	for _, n := range m.nodes {
+		nodes = append(nodes, n)
+	}
+	edges := make([]graph.Edge, 0, len(m.order))
+	for _, e := range m.order {
+		if _, ok := m.nodes[e.From]; !ok {
+			m.dropped++
+			continue
+		}
+		if _, ok := m.nodes[e.To]; !ok {
+			m.dropped++
+			continue
+		}
+		edges = append(edges, e)
+	}
+	return pkgs, nodes, edges
 }
 
 func emptyDocument(ctx context.Context, opts Options) *graph.Document {
@@ -1249,7 +1422,7 @@ func (x *extractor) document(ctx context.Context) (*graph.Document, error) {
 	}
 	for _, acc := range x.edges {
 		e := acc.edge
-		if x.nodes[e.From] == nil || x.nodes[e.To] == nil {
+		if x.nodes[e.From] == nil || (x.nodes[e.To] == nil && !x.crossModule[e.To]) {
 			continue
 		}
 		if e.Kind == graph.EdgeCalls {

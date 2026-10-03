@@ -6,6 +6,7 @@ package graph
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,13 @@ import (
 
 // SchemaVersion is the only schema version this build reads or writes.
 const SchemaVersion = 1
+
+// ErrNoPackages is returned by an extractor that found nothing to extract:
+// no go.mod, no source under the module roots, a directory in another
+// language. A document with no packages is never a graph of a repo, so it
+// is an error here rather than an empty graph that would read downstream
+// as "nothing changed".
+var ErrNoPackages = errors.New("no packages")
 
 // Node kinds.
 const (

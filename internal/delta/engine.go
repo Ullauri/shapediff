@@ -1,6 +1,7 @@
 package delta
 
 import (
+	"container/heap"
 	"fmt"
 	"regexp"
 	"sort"
@@ -795,31 +796,55 @@ func (e *engine) walk(ix *graph.Index, handler string) reach {
 	return Reach(ix, handler, func(id string) bool { return e.okInBoth(ix, id) })
 }
 
+// widthHeap orders (node, width) by width then ID: the frontier of the
+// minimax walk below.
+type widthItem struct {
+	id string
+	w  int
+}
+
+type widthHeap []widthItem
+
+func (h widthHeap) Len() int { return len(h) }
+func (h widthHeap) Less(i, j int) bool {
+	if h[i].w != h[j].w {
+		return h[i].w < h[j].w
+	}
+	return h[i].id < h[j].id
+}
+func (h widthHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *widthHeap) Push(x any)   { *h = append(*h, x.(widthItem)) }
+func (h *widthHeap) Pop() any {
+	old := *h
+	it := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return it
+}
+
 // Reach computes, from one symbol, the width (widest dynamic edge on the
 // narrowest path, spec 7.4) of every reached package and sink. ok says
 // which nodes may be traversed; nil means all.
+//
+// It is a minimax Dijkstra over a heap, O(E log V) per handler. It is run
+// per entry point, for base and head, by the delta, the filter and the
+// baseline map, so on a service with hundreds of handlers over tens of
+// thousands of symbols a linear scan for the next node (quadratic in the
+// reached symbols) was the job's whole running time.
 func Reach(ix *graph.Index, handler string, ok func(id string) bool) map[string]int {
 	if ok == nil {
 		ok = func(string) bool { return true }
 	}
 	width := map[string]int{handler: 0}
-	// minimax Dijkstra; the graph is small enough for a simple loop
 	done := map[string]bool{}
-	for {
-		cur, best := "", -1
-		for id, w := range width {
-			if done[id] {
-				continue
-			}
-			if best < 0 || w < best || (w == best && id < cur) {
-				cur, best = id, w
-			}
+	frontier := &widthHeap{{id: handler, w: 0}}
+	for frontier.Len() > 0 {
+		it := heap.Pop(frontier).(widthItem)
+		if done[it.id] || it.w != width[it.id] {
+			continue // settled, or a stale entry an improvement superseded
 		}
-		if cur == "" {
-			break
-		}
-		done[cur] = true
-		for _, ed := range ix.Out[cur] {
+		done[it.id] = true
+		best := it.w
+		for _, ed := range ix.Out[it.id] {
 			if ed.Kind != graph.EdgeCalls {
 				continue
 			}
@@ -833,8 +858,9 @@ func Reach(ix *graph.Index, handler string, ok func(id string) bool) map[string]
 			if w < best {
 				w = best
 			}
-			if old, ok := width[ed.To]; !ok || w < old {
+			if old, seen := width[ed.To]; !seen || w < old {
 				width[ed.To] = w
+				heap.Push(frontier, widthItem{ed.To, w})
 			}
 		}
 	}
@@ -993,9 +1019,35 @@ func better(a, b pathState) bool {
 	return false
 }
 
+// pathHeap orders path states by better: the frontier of changedPath.
+type pathEntry struct {
+	k  pathKey
+	st pathState
+}
+
+type pathKey struct {
+	id      string
+	through bool
+}
+
+type pathHeap []pathEntry
+
+func (h pathHeap) Len() int           { return len(h) }
+func (h pathHeap) Less(i, j int) bool { return better(h[i].st, h[j].st) }
+func (h pathHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *pathHeap) Push(x any)        { *h = append(*h, x.(pathEntry)) }
+func (h *pathHeap) Pop() any {
+	old := *h
+	it := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return it
+}
+
 // changedPath finds the shortest path from the entry point to the reached
 // item through at least one changed node (spec 8.2); ties prefer lower max
 // targets, then smaller node IDs. Falls back to the plain shortest path.
+// A heap-ordered search like Reach: it runs once per reached item per
+// entry point whose reach changed.
 func (e *engine) changedPath(entry, item string, changed map[string]bool) []string {
 	ix := e.head
 	isTarget := func(id string) bool {
@@ -1004,29 +1056,21 @@ func (e *engine) changedPath(entry, item string, changed map[string]bool) []stri
 		}
 		return strings.HasPrefix(item, "pkg:") && ix.PackageOf(id) == item && ix.Nodes[id].Kind == graph.KindSymbol
 	}
-	type key struct {
-		id      string
-		through bool
-	}
+	type key = pathKey
 	best := map[key]pathState{}
 	start := pathState{path: []string{entry}, through: changed[entry]}
 	best[key{entry, start.through}] = start
 	done := map[key]bool{}
+	frontier := &pathHeap{{k: key{entry, start.through}, st: start}}
 	var found *pathState
-	for {
-		var curK key
-		var cur pathState
-		first := true
-		for k, st := range best {
-			if done[k] {
-				continue
-			}
-			if first || better(st, cur) {
-				curK, cur, first = k, st, false
-			}
+	for frontier.Len() > 0 {
+		pe := heap.Pop(frontier).(pathEntry)
+		curK, cur := pe.k, pe.st
+		if done[curK] {
+			continue
 		}
-		if first {
-			break
+		if b, ok := best[curK]; ok && better(b, cur) {
+			continue // stale: a better state for this key was pushed since
 		}
 		done[curK] = true
 		if isTarget(curK.id) && curK.through {
@@ -1057,6 +1101,7 @@ func (e *engine) changedPath(entry, item string, changed map[string]bool) []stri
 			k := key{ed.To, ns.through}
 			if old, ok := best[k]; !ok || better(ns, old) {
 				best[k] = ns
+				heap.Push(frontier, pathEntry{k: k, st: ns})
 			}
 		}
 	}

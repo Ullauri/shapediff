@@ -141,6 +141,16 @@ section.
   "and N more" under open-able rows is a plain line, not a bullet among
   disclosure triangles. Sentences about packages, imports and routes keep
   their bullets.
+- **A guess is named as a guess (section 3).** "Called by" lists the
+  callers the code names; a caller whose only call is dynamic with several
+  possible targets (an interface method the call graph resolved to this
+  method among others) is "possibly by", apart, since it may not even be
+  able to import the callee. The sentence under a call-path diagram says
+  whether an entry point reaches the changed code by asking the call
+  stacks, not by whether the diagram happened to draw the entry point; and
+  the zero line says "no endpoint's reach changed except through calls
+  with many possible targets" when that is the case, since on a program
+  whose `main` dispatches through a table that is the only reach there is.
 - **Counts name what they count.** `graph.DescribeKinds` turns counts per
   symbol kind into "3 functions and 1 type"; the note never says "symbols".
 - **Colliding package labels are widened (section 10).** Each package drawn

@@ -257,6 +257,40 @@ func reachName(n filter.Node, names map[string]string) string {
 	return "`" + mdEsc(n.Label) + "`"
 }
 
+// stacksReaching names the entry points whose call stacks hold a changed
+// definition this diagram draws (inside a "+N more" box included), in
+// stack order.
+func stacksReaching(in NoteInput, dg *filter.Diagram) []string {
+	if in.Filter == nil {
+		return nil
+	}
+	changed := map[string]bool{}
+	for _, n := range dg.Nodes {
+		switch n.Kind {
+		case filter.KindSymbol:
+			if n.Status != filter.StatusContext {
+				changed[n.ID] = true
+			}
+		case filter.KindMore:
+			for _, m := range n.Members {
+				if m.Status != filter.StatusContext {
+					changed[m.ID] = true
+				}
+			}
+		}
+	}
+	var eps []string
+	for _, st := range in.Filter.Stacks {
+		for _, ln := range st.Lines {
+			if changed[ln.ID] {
+				eps = append(eps, "`"+mdEsc(st.Label)+"`")
+				break
+			}
+		}
+	}
+	return eps
+}
+
 // CallPathBlurb is the paragraph under one call-path diagram: where it
 // starts, then what changed in it and what it draws as context, package by
 // package, each definition linked to its line. A "+N more" box is opened up
@@ -312,16 +346,25 @@ func CallPathBlurb(in NoteInput, dg *filter.Diagram) string {
 	for _, c := range clauses {
 		changed = changed || c.status != filter.StatusContext
 	}
+	// Whether an entry point reaches the changed code drawn here is a fact
+	// about the graph, which the call stacks (section 10.3) already hold,
+	// not about what this diagram happened to draw: the entry point is
+	// often two hops up, outside the one hop of context the diagram keeps.
+	// Saying "no entry point reaches" here while the stacks below show one
+	// doing so is the prose disagreeing with the note.
+	reachedBy := stacksReaching(in, dg)
 	var lead string
 	switch {
 	case len(eps) == 1:
 		lead = "What " + eps[0] + " calls, down to the changed code:"
 	case len(eps) > 1:
 		lead = "What " + andList(eps, 0) + " call, down to the changed code:"
+	case changed && len(reachedBy) > 0:
+		lead = "Reached from " + andList(reachedBy, 0) + " (see the call stacks); shown with what calls it and what it calls:"
+	case changed && in.Filter != nil && len(in.Filter.StacksCut) > 0:
+		lead = fmt.Sprintf("Not reached from the entry points in the call stacks (%d more were left out); shown with what calls it and what it calls:", len(in.Filter.StacksCut))
 	case changed:
-		// "Narrowly" is section 7.4's word, not a reviewer's: it means
-		// the only paths run through a call with many possible targets.
-		lead = "Changed code no entry point reaches, except through a call with many possible targets, with what calls it and what it calls:"
+		lead = "No entry point reaches this code directly (at most through a call with many possible targets); shown with what calls it and what it calls:"
 	default:
 		// The remainder of a split can hold only context; saying it holds
 		// changed code would be a claim the picture does not make.

@@ -127,7 +127,7 @@ flowchart LR
   class na90b54ed added
 ```
 
-Changed code no entry point reaches, except through a call with many possible targets, with what calls it and what it calls:
+No entry point reaches this code directly (at most through a call with many possible targets); shown with what calls it and what it calls:
 
 - 🟩 **new** in `a`: `B`
 

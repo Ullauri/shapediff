@@ -80,7 +80,22 @@ func Unchanged(d *delta.Delta) string {
 		parts = append(parts, "no endpoint was added")
 	}
 	if s.EntrypointsReachChanged == 0 {
-		parts = append(parts, "no endpoint's reach changed")
+		wide := 0
+		for _, ep := range d.Entrypoints {
+			if len(ep.WideReachAdded)+len(ep.WideReachRemoved) > 0 {
+				wide++
+			}
+		}
+		switch {
+		case wide == 0:
+			parts = append(parts, "no endpoint's reach changed")
+		default:
+			// Reach through a call with many possible targets is listed
+			// under Details, not drawn (section 7.4); on a program whose
+			// entry point is a command dispatching through a table, it is
+			// the only reach there is, and "no reach changed" would be false.
+			parts = append(parts, fmt.Sprintf("no endpoint's reach changed except through calls with many possible targets (%d %s, under Details)", wide, plural(wide, "endpoint", "endpoints")))
+		}
 	}
 	if s.SignaturesChanged == 0 {
 		parts = append(parts, "no signature changed")

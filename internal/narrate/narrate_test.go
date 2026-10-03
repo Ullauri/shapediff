@@ -353,3 +353,15 @@ func TestKindListFoldsTestsAndGenerated(t *testing.T) {
 		t.Errorf("tests and generated: lead %q", lead)
 	}
 }
+
+// TestUnchangedNamesWideReach: when the only reach that changed runs
+// through calls with many possible targets, the zero line says so rather
+// than "no endpoint's reach changed".
+func TestUnchangedNamesWideReach(t *testing.T) {
+	d := &delta.Delta{SchemaVersion: 1}
+	d.Stats = delta.Stats{EntrypointsAdded: 1, SignaturesChanged: 1, PackagesAdded: 1}
+	d.Entrypoints = []delta.Entrypoint{{ID: "entry:cli:main", Status: "unchanged", WideReachAdded: []string{"pkg:a/forge", "pkg:a/github"}}}
+	if got, want := Unchanged(d), "No endpoint's reach changed except through calls with many possible targets (1 endpoint, under Details)."; got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}

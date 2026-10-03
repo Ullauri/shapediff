@@ -32,26 +32,50 @@ import (
 	"github.com/Ullauri/shapediff/internal/render"
 )
 
-// notesAdapter narrows gitlab.Client to what the pipeline needs.
+// notesAdapter narrows gitlab.Client to what the pipeline needs. It only
+// takes a note for the job's own when the token's user wrote it, like the
+// GitHub side: anyone who can comment can type the marker.
 type notesAdapter struct {
-	c *gitlab.Client
-	p gitlab.Project
+	c   *gitlab.Client
+	p   gitlab.Project
+	log io.Writer
+	// author is whose note is the note: SHAPEDIFF_COMMENT_AUTHOR, else the
+	// token's own username. Resolved on first use.
+	author   string
+	resolved bool
 }
 
-func (a notesAdapter) FindMarkedNote(ctx context.Context, iid int, marker string) (int, string, bool, error) {
-	n, err := a.c.FindMarkedNote(ctx, a.p, iid, marker)
+func (a *notesAdapter) whose(ctx context.Context) string {
+	if a.resolved {
+		return a.author
+	}
+	a.resolved = true
+	if a.author != "" {
+		return a.author
+	}
+	login, err := a.c.Login(ctx)
+	if err != nil {
+		fmt.Fprintf(a.log, "shapediff: cannot read the token's user (%v); the note is matched by its marker alone, so set SHAPEDIFF_COMMENT_AUTHOR\n", err)
+		return ""
+	}
+	a.author = login
+	return a.author
+}
+
+func (a *notesAdapter) FindMarkedNote(ctx context.Context, iid int, marker string) (int, string, bool, error) {
+	n, err := a.c.FindMarkedNote(ctx, a.p, iid, marker, a.whose(ctx))
 	if err != nil || n == nil {
 		return 0, "", false, err
 	}
 	return n.ID, n.Body, true, nil
 }
 
-func (a notesAdapter) CreateNote(ctx context.Context, iid int, body string) error {
+func (a *notesAdapter) CreateNote(ctx context.Context, iid int, body string) error {
 	_, err := a.c.CreateMRNote(ctx, a.p, iid, body)
 	return err
 }
 
-func (a notesAdapter) UpdateNote(ctx context.Context, iid, noteID int, body string) error {
+func (a *notesAdapter) UpdateNote(ctx context.Context, iid, noteID int, body string) error {
 	_, err := a.c.UpdateMRNote(ctx, a.p, iid, noteID, body)
 	return err
 }
@@ -229,7 +253,7 @@ func deps(env pipeline.Env, cfg *config.Config, extractor string, log io.Writer)
 	case env.Forge == forge.GitHub:
 		fmt.Fprintln(log, "shapediff: no GITHUB_TOKEN or SHAPEDIFF_TOKEN; the comment will not be posted")
 	case client != nil:
-		d.Notes = notesAdapter{c: client, p: projectOf(env)}
+		d.Notes = &notesAdapter{c: client, p: projectOf(env), log: log, author: env.CommentAuthor}
 	default:
 		fmt.Fprintln(log, "shapediff: no CI_API_V4_URL or SHAPEDIFF_TOKEN; notes will not be posted")
 	}

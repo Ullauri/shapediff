@@ -166,7 +166,10 @@ section.
   a reply quoting the note carries it too, and only in a comment by the
   token's own user (`github-actions[bot]` for `GITHUB_TOKEN`, which cannot
   read `/user`; `SHAPEDIFF_COMMENT_AUTHOR` overrides), since anyone who can
-  comment can type the marker. When no merge base is found the fallback is
+  comment can type the marker. The GitLab side applies the same two rules,
+  with the token's username from `/user`; when that cannot be read it says
+  so and falls back to the marker alone. Neither client retries a POST: a
+  lost response would otherwise post the note twice. When no merge base is found the fallback is
   a line on the job's log, not in the note.
 - **GitHub's comment limit** is 65,536 characters; GitLab's note limit is
   far above any note. A longer note loses its Details section first, with a

@@ -92,9 +92,12 @@ func (c *Client) http() *http.Client {
 	return &http.Client{Timeout: 60 * time.Second}
 }
 
-// do performs one request, retrying once on a 5xx, and decodes JSON into
-// out when out is non-nil. Body may be nil, a JSON-encodable value or an
-// io.Reader (sent raw with contentType).
+// do performs one request, retrying once on a 5xx or a transport error,
+// and decodes JSON into out when out is non-nil; with a nil out the body
+// is left open for the caller to read and close. Body may be nil, a
+// JSON-encodable value or an io.Reader (sent raw with contentType). A POST
+// is never retried: when the first one was created and only its response
+// was lost, a retry would post a second note.
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, body any, contentType string, out any) (*http.Response, error) {
 	u := strings.TrimRight(c.BaseURL, "/") + path
 	if len(query) > 0 {
@@ -117,8 +120,12 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 		}
 		contentType = "application/json"
 	}
+	attempts := 2
+	if method == http.MethodPost {
+		attempts = 1
+	}
 	var last error
-	for attempt := 0; attempt < 2; attempt++ {
+	for attempt := 0; attempt < attempts; attempt++ {
 		req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
@@ -193,19 +200,44 @@ func (c *Client) UpdateMRNote(ctx context.Context, p Project, iid, noteID int, b
 	return &n, nil
 }
 
-// FindMarkedNote returns the first non-system note whose body contains the
-// marker, or nil when there is none.
-func (c *Client) FindMarkedNote(ctx context.Context, p Project, iid int, marker string) (*Note, error) {
+// FindMarkedNote returns the first non-system note by author whose body
+// starts with the marker, or nil when there is none. By author, because
+// anyone who can comment can write the marker: a stranger's note taken for
+// the job's would be edited under their name, or refuse the edit and keep
+// the real note from ever being posted. Starts with, not contains: a reply
+// that quotes the note carries the marker too, behind "> ". An empty
+// author matches by the marker alone, which is only for when the token's
+// own user cannot be resolved; callers should say so when they fall back.
+func (c *Client) FindMarkedNote(ctx context.Context, p Project, iid int, marker, author string) (*Note, error) {
 	notes, err := c.ListMRNotes(ctx, p, iid)
 	if err != nil {
 		return nil, err
 	}
 	for i := range notes {
-		if !notes[i].System && strings.Contains(notes[i].Body, marker) {
-			return &notes[i], nil
+		n := &notes[i]
+		if n.System || !strings.HasPrefix(strings.TrimLeft(n.Body, " \t\r\n"), marker) {
+			continue
+		}
+		if author == "" || strings.EqualFold(n.Author.Username, author) {
+			return n, nil
 		}
 	}
 	return nil, nil
+}
+
+// Login is the username the token acts as: for a project access token,
+// its bot user. It is whose note FindMarkedNote looks for.
+func (c *Client) Login(ctx context.Context) (string, error) {
+	var u struct {
+		Username string `json:"username"`
+	}
+	if _, err := c.do(ctx, http.MethodGet, "/user", nil, nil, "", &u); err != nil {
+		return "", err
+	}
+	if u.Username == "" {
+		return "", fmt.Errorf("gitlab: /user returned no username")
+	}
+	return u.Username, nil
 }
 
 // ListNoteAwards returns the award emoji on an MR note.
@@ -292,8 +324,12 @@ func (c *Client) UpsertWikiPage(ctx context.Context, p Project, title, content s
 
 // UploadPackageFile puts one file in the generic package registry.
 func (c *Client) UploadPackageFile(ctx context.Context, p Project, name, version, file string, data []byte) error {
-	_, err := c.do(ctx, http.MethodPut, fmt.Sprintf("/projects/%s/packages/generic/%s/%s/%s", p.encoded(), url.PathEscape(name), url.PathEscape(version), url.PathEscape(file)), nil, bytes.NewReader(data), "application/octet-stream", nil)
-	return err
+	resp, err := c.do(ctx, http.MethodPut, fmt.Sprintf("/projects/%s/packages/generic/%s/%s/%s", p.encoded(), url.PathEscape(name), url.PathEscape(version), url.PathEscape(file)), nil, bytes.NewReader(data), "application/octet-stream", nil)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close() // nothing to read; a nil out leaves the body to the caller
+	return nil
 }
 
 // DownloadPackageFile fetches one file; (nil, false, nil) when absent.

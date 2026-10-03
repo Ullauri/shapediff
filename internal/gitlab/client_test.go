@@ -30,7 +30,7 @@ func TestNotesRoundTrip(t *testing.T) {
 				w.Header().Set("X-Next-Page", "2")
 				json.NewEncoder(w).Encode([]Note{{ID: 1, Body: "hello", System: true}, {ID: 2, Body: "plain"}})
 			} else {
-				json.NewEncoder(w).Encode([]Note{{ID: 3, Body: "<!-- shapediff:v1 -->\nx"}})
+				json.NewEncoder(w).Encode([]Note{{ID: 3, Body: "<!-- shapediff:v1 -->\nx", Author: author("project_1_bot")}})
 			}
 		case r.Method == "POST" && r.URL.EscapedPath() == "/api/v4/projects/group%2Fsvc/merge_requests/7/notes":
 			var m map[string]string
@@ -49,7 +49,7 @@ func TestNotesRoundTrip(t *testing.T) {
 	})
 	ctx := context.Background()
 	p := ProjectPath("group/svc")
-	n, err := c.FindMarkedNote(ctx, p, 7, "<!-- shapediff:v1 -->")
+	n, err := c.FindMarkedNote(ctx, p, 7, "<!-- shapediff:v1 -->", "project_1_bot")
 	if err != nil || n == nil || n.ID != 3 {
 		t.Fatalf("FindMarkedNote = %v, %v", n, err)
 	}
@@ -155,6 +155,74 @@ func TestWikiUpsertAndPackages(t *testing.T) {
 	b, ok, err := c.DownloadPackageFile(ctx, p, "graphs", "k1", "graph.json")
 	if err != nil || !ok || string(b) != "{}" {
 		t.Fatalf("download = %q %v %v", b, ok, err)
+	}
+}
+
+func author(name string) (a struct {
+	Username string `json:"username"`
+}) {
+	a.Username = name
+	return a
+}
+
+// TestFindMarkedNoteByAuthorAndPrefix: a system note, a reply quoting the
+// marker and a stranger's note that starts with it are all passed over;
+// the token's own note is the note. Without an author the marker alone
+// decides, and the stranger's note is taken, which is why callers only
+// fall back to that when /user cannot be read.
+func TestFindMarkedNoteByAuthorAndPrefix(t *testing.T) {
+	const marker = "<!-- shapediff:v1 -->"
+	c, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode([]Note{
+			{ID: 1, Body: marker + " system", System: true, Author: author("project_1_bot")},
+			{ID: 2, Body: "> " + marker + "\n> quoted in a reply", Author: author("reviewer")},
+			{ID: 3, Body: marker + "\nnot the bot", Author: author("stranger")},
+			{ID: 4, Body: "\n  " + marker + "\nthe note", Author: author("Project_1_Bot")},
+		})
+	})
+	ctx := context.Background()
+	n, err := c.FindMarkedNote(ctx, ProjectID(1), 1, marker, "project_1_bot")
+	if err != nil || n == nil || n.ID != 4 {
+		t.Fatalf("by author: %+v %v", n, err)
+	}
+	n, err = c.FindMarkedNote(ctx, ProjectID(1), 1, marker, "nobody")
+	if err != nil || n != nil {
+		t.Fatalf("no note by that author: %+v %v", n, err)
+	}
+	n, err = c.FindMarkedNote(ctx, ProjectID(1), 1, marker, "")
+	if err != nil || n == nil || n.ID != 3 {
+		t.Fatalf("marker alone: %+v %v", n, err)
+	}
+}
+
+func TestLogin(t *testing.T) {
+	c, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v4/user" {
+			w.WriteHeader(404)
+			return
+		}
+		w.Write([]byte(`{"id": 7, "username": "project_1_bot"}`))
+	})
+	if u, err := c.Login(context.Background()); err != nil || u != "project_1_bot" {
+		t.Fatalf("login = %q %v", u, err)
+	}
+}
+
+// TestPostIsNeverRetried: a 502 on a POST is an error after one attempt,
+// because the note may have been created and only the response lost.
+func TestPostIsNeverRetried(t *testing.T) {
+	var calls int32
+	c, _ := newServer(t, func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(502)
+		w.Write([]byte("bad gateway"))
+	})
+	_, err := c.CreateMRNote(context.Background(), ProjectID(1), 1, "x")
+	if err == nil || calls != 1 {
+		t.Fatalf("err = %v, calls = %d", err, calls)
+	}
+	if _, err := c.CreateWikiPage(context.Background(), ProjectID(1), "t", "c"); err == nil || calls != 2 {
+		t.Fatalf("wiki err = %v, calls = %d", err, calls)
 	}
 }
 

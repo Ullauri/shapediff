@@ -19,18 +19,18 @@ package main
 //	    Repos      []weeklyRepo
 //	    Client     *gitlab.Client   // nil in --dry-run
 //	    WikiProject gitlab.Project  // the central "structure" project
-//	    Graphs     cache.Store
-//	    Deltas     cache.Store
 //	    LayoutDir  string           // where <slug>.layout.json files live
-//	    Extract    func(ctx context.Context, repoDir, sha string) (*graph.Document, error)
-//	    Delta      func(base, head *graph.Document) (*delta.Delta, error)
-//	    KeyParts   pipeline.KeyParts
+//	    Store      func(r weeklyRepo) cache.Store                      // the repo's own cache
+//	    KeyParts   func(ctx context.Context, r weeklyRepo) pipeline.KeyParts
+//	    Delta      func(r weeklyRepo) func(base, head *graph.Document) (*delta.Delta, error)
+//	    Extract    func(ctx context.Context, r weeklyRepo, repoDir, sha string) (*graph.Document, error)
 //	}
 //	func weeklyDeps(reposFile string, dryRun bool) (weeklyDepsT, error)
 //
 // reposFile is a YAML list of repos (slug, dir, branch, project, url).
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -165,15 +165,16 @@ func weeklyRepoWeek(ctx context.Context, wd weeklyDepsT, r weeklyRepo, start, en
 		return rw, err
 	}
 	rw.BaseSHA, rw.HeadSHA = baseSHA, headSHA
-	base, err := weeklyGraph(ctx, wd, r, baseSHA)
+	store, kp := wd.Store(r), wd.KeyParts(ctx, r)
+	base, err := weeklyGraph(ctx, wd, r, store, kp, baseSHA)
 	if err != nil {
 		return rw, fmt.Errorf("base %s: %w", baseSHA, err)
 	}
-	head, err := weeklyGraph(ctx, wd, r, headSHA)
+	head, err := weeklyGraph(ctx, wd, r, store, kp, headSHA)
 	if err != nil {
 		return rw, fmt.Errorf("head %s: %w", headSHA, err)
 	}
-	d, err := wd.Delta(base, head)
+	d, err := wd.Delta(r)(base, head)
 	if err != nil {
 		return rw, err
 	}
@@ -190,16 +191,11 @@ func weeklyRepoWeek(ctx context.Context, wd weeklyDepsT, r weeklyRepo, start, en
 		}
 	}
 	rw.Attribution = weekly.Attribute(d, rw.MRs, func(iid int, sha string) (*delta.Delta, bool) {
-		b, ok, err := wd.Deltas.Get(ctx, cache.MRKey(r.Slug, iid, sha))
+		b, ok, err := store.Get(ctx, cache.MRKey(r.Slug, iid, sha))
 		if err != nil || !ok {
 			return nil, false
 		}
-		tmp := filepath.Join(os.TempDir(), fmt.Sprintf("shapediff-mr%d.json", iid))
-		if err := os.WriteFile(tmp, b, 0o600); err != nil {
-			return nil, false
-		}
-		defer os.Remove(tmp)
-		md, err := delta.ReadFile(tmp)
+		md, err := delta.Read(bytes.NewReader(b))
 		return md, err == nil
 	})
 
@@ -227,9 +223,12 @@ func weeklyRepoWeek(ctx context.Context, wd weeklyDepsT, r weeklyRepo, start, en
 	return rw, nil
 }
 
-func weeklyGraph(ctx context.Context, wd weeklyDepsT, r weeklyRepo, sha string) (*graph.Document, error) {
-	key := cache.Key{Repo: r.Slug, SHA: sha, ExtractorVersion: wd.KeyParts.Version, Toolchain: wd.KeyParts.Toolchain, BuilderMode: wd.KeyParts.BuilderMode, ConfigHash: wd.KeyParts.ConfigHash}.String()
-	if b, ok, err := wd.Graphs.Get(ctx, key); err == nil && ok {
+// weeklyGraph is the repo's graph at sha: from the repo's own cache under
+// the key its per-MR jobs use, else extracted from a worktree and cached
+// under that key.
+func weeklyGraph(ctx context.Context, wd weeklyDepsT, r weeklyRepo, store cache.Store, kp pipeline.KeyParts, sha string) (*graph.Document, error) {
+	key := cache.Key{Repo: r.Slug, SHA: sha, ExtractorVersion: kp.Version, Toolchain: kp.Toolchain, BuilderMode: kp.BuilderMode, ConfigHash: kp.ConfigHash}.String()
+	if b, ok, err := store.Get(ctx, key); err == nil && ok {
 		if g, err := graph.Read(strings.NewReader(string(b))); err == nil {
 			return g, nil
 		}
@@ -239,12 +238,12 @@ func weeklyGraph(ctx context.Context, wd weeklyDepsT, r weeklyRepo, sha string) 
 		return nil, err
 	}
 	defer wt.Remove()
-	g, err := wd.Extract(ctx, wt.Dir, sha)
+	g, err := wd.Extract(ctx, r, wt.Dir, sha)
 	if err != nil {
 		return nil, err
 	}
 	if b, err := g.Marshal(); err == nil {
-		_ = wd.Graphs.Put(ctx, key, b)
+		_ = store.Put(ctx, key, b)
 	}
 	return g, nil
 }

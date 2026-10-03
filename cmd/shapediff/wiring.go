@@ -247,16 +247,28 @@ type weeklyRepo struct {
 	Project    gitlab.Project `yaml:"-"`
 }
 
+// weeklyDepsT is what the weekly job needs. The cache, the cache key parts
+// and the delta options are per repo, because the per-MR jobs whose graphs
+// and deltas the weekly job reads ran per repo: each wrote to its own
+// project's registry (or the one shared directory) under a key made of its
+// own toolchain and config hash. One store and one key set for every repo
+// read a registry nobody wrote and keys nobody used, and attribution found
+// nothing.
 type weeklyDepsT struct {
 	Repos       []weeklyRepo
 	Client      *gitlab.Client
 	WikiProject gitlab.Project
-	Graphs      cache.Store
-	Deltas      cache.Store
 	LayoutDir   string
-	Extract     func(ctx context.Context, repoDir, sha string) (*graph.Document, error)
-	Delta       func(base, head *graph.Document) (*delta.Delta, error)
-	KeyParts    pipeline.KeyParts
+	// Store is the cache the repo's own per-MR jobs write: its package
+	// registry with SHAPEDIFF_CACHE=gitlab, else the shared directory.
+	Store func(r weeklyRepo) cache.Store
+	// KeyParts are the graph cache key's non-SHA parts for the repo, from
+	// its own checkout and config, as the per-MR job computes them.
+	KeyParts func(ctx context.Context, r weeklyRepo) pipeline.KeyParts
+	// Delta subtracts with the repo's own narrow_targets.
+	Delta func(r weeklyRepo) func(base, head *graph.Document) (*delta.Delta, error)
+	// Extract produces the repo's graph at sha from a checkout at repoDir.
+	Extract func(ctx context.Context, r weeklyRepo, repoDir, sha string) (*graph.Document, error)
 	// Cleanup, when set, is called once the run is over.
 	Cleanup func()
 }
@@ -290,11 +302,6 @@ func weeklyDeps(reposFile string, dryRun bool) (weeklyDepsT, error) {
 	if !dryRun && os.Getenv("CI_API_V4_URL") != "" && os.Getenv("SHAPEDIFF_TOKEN") != "" {
 		wd.Client = &gitlab.Client{BaseURL: os.Getenv("CI_API_V4_URL"), Token: os.Getenv("SHAPEDIFF_TOKEN")}
 	}
-	store, err := cache.FromEnv(cache.EnvSpec{Value: f.Cache, ProjectDir: filepath.Dir(reposFile), Client: wd.Client, Project: wd.WikiProject})
-	if err != nil {
-		return weeklyDepsT{}, err
-	}
-	wd.Graphs, wd.Deltas = store, store
 	for i := range f.Repos {
 		r := &f.Repos[i]
 		if r.Branch == "" {
@@ -309,32 +316,51 @@ func weeklyDeps(reposFile string, dryRun bool) (weeklyDepsT, error) {
 		}
 	}
 	wd.Repos = f.Repos
-	// one config and key set per run: the weekly job uses each repo's own
-	// .shapediff.yml for extraction but the wiki job's defaults for budgets
-	first := f.Repos[0]
-	cfg, err := loadRepoConfig(first.Dir)
-	if err != nil {
-		cfg = config.Default()
-	}
-	wd.Extract = func(ctx context.Context, repoDir, sha string) (*graph.Document, error) {
-		rc, err := loadRepoConfig(repoDir)
-		if err != nil {
-			rc = config.Default()
+	// The cache the per-MR jobs wrote: with "gitlab", each repo's own
+	// package registry (the per-MR job of repo X writes X's registry);
+	// otherwise one directory every job shares.
+	stores := map[string]cache.Store{}
+	if strings.TrimSpace(f.Cache) == "gitlab" {
+		for _, r := range f.Repos {
+			store, err := cache.FromEnv(cache.EnvSpec{Value: f.Cache, ProjectDir: filepath.Dir(reposFile), Client: wd.Client, Project: r.Project})
+			if err != nil {
+				return weeklyDepsT{}, fmt.Errorf("repo %s: %w", r.Slug, err)
+			}
+			stores[r.Slug] = store
 		}
-		return goextract.ExtractAll(ctx, goextract.Options{RepoDir: repoDir, Repo: slugFor(f.Repos, repoDir), SHA: sha, Version: Version, Config: rc})
+	} else {
+		shared, err := cache.FromEnv(cache.EnvSpec{Value: f.Cache, ProjectDir: filepath.Dir(reposFile)})
+		if err != nil {
+			return weeklyDepsT{}, err
+		}
+		for _, r := range f.Repos {
+			stores[r.Slug] = shared
+		}
 	}
-	wd.Delta = deltaFn(cfg, "", 0)
-	wd.KeyParts = keyParts(context.Background(), cfg, first.Dir)
+	wd.Store = func(r weeklyRepo) cache.Store { return stores[r.Slug] }
+	wd.KeyParts = func(ctx context.Context, r weeklyRepo) pipeline.KeyParts {
+		return keyParts(ctx, repoConfig(r.Dir), r.Dir)
+	}
+	wd.Delta = func(r weeklyRepo) func(base, head *graph.Document) (*delta.Delta, error) {
+		return deltaFn(repoConfig(r.Dir), "", 0)
+	}
+	wd.Extract = func(ctx context.Context, r weeklyRepo, repoDir, sha string) (*graph.Document, error) {
+		// The config is the worktree's own: that sha's .shapediff.yml is
+		// the one that described it.
+		return goextract.ExtractAll(ctx, goextract.Options{RepoDir: repoDir, Repo: r.Slug, SHA: sha, Version: Version, Config: repoConfig(repoDir)})
+	}
 	return wd, nil
 }
 
-func slugFor(repos []weeklyRepo, dir string) string {
-	for _, r := range repos {
-		if r.Dir == dir || strings.HasPrefix(dir, r.Dir) {
-			return r.Slug
-		}
+// repoConfig is a checkout's .shapediff.yml, or the defaults when it does
+// not load: the weekly job reports on a repo, it does not fail for it.
+func repoConfig(dir string) *config.Config {
+	cfg, err := loadRepoConfig(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shapediff weekly: %s: %v; using defaults\n", dir, err)
+		return config.Default()
 	}
-	return filepath.Base(dir)
+	return cfg
 }
 
 // weeklyLocalDeps builds the weekly job for one local checkout, with no repos
@@ -361,33 +387,38 @@ func weeklyLocalDeps(repoDir, branch, extractor string) (weeklyDepsT, error) {
 			return weeklyDepsT{}, err
 		}
 	}
-	cfg, err := loadRepoConfig(dir)
-	if err != nil {
-		cfg = config.Default()
-	}
+	cfg := repoConfig(dir)
 	slug := repoSlug(dir)
 	tmp, err := os.MkdirTemp("", "shapediff-weekly-")
 	if err != nil {
 		return weeklyDepsT{}, err
 	}
 	store := cache.Dir{Path: tmp}
+	kp := keyParts(context.Background(), cfg, dir)
+	if extractor != "" {
+		kp.Toolchain, kp.BuilderMode = pluginToolchain(extractor), "plugin"
+	}
 	wd := weeklyDepsT{
-		Repos:  []weeklyRepo{{Slug: slug, Dir: dir, Branch: branch}},
-		Graphs: store,
-		Deltas: store,
+		Repos: []weeklyRepo{{Slug: slug, Dir: dir, Branch: branch}},
+		Store: func(weeklyRepo) cache.Store { return store },
 		// Neither the temp directory nor the checkout: weeklyRepoWeek writes
 		// the diagram SVG here and tells the reader to go and find it, so it
 		// has to outlive the run — but shapediff has no standing to leave an
 		// untracked directory in someone else's repo.
 		LayoutDir: localLayoutDir(slug),
-		Delta:     deltaFn(cfg, "", 0),
-		KeyParts:  keyParts(context.Background(), cfg, dir),
+		Delta:     func(weeklyRepo) func(base, head *graph.Document) (*delta.Delta, error) { return deltaFn(cfg, "", 0) },
+		KeyParts:  func(context.Context, weeklyRepo) pipeline.KeyParts { return kp },
 		Cleanup:   func() { os.RemoveAll(tmp) },
 	}
 	if extractor != "" {
-		wd.Extract = pluginExtractFn(extractor)
+		plug := pluginExtractFn(extractor)
+		wd.Extract = func(ctx context.Context, _ weeklyRepo, repoDir, sha string) (*graph.Document, error) {
+			return plug(ctx, repoDir, sha)
+		}
 	} else {
-		wd.Extract = extractFn(cfg, slug)
+		wd.Extract = func(ctx context.Context, r weeklyRepo, repoDir, sha string) (*graph.Document, error) {
+			return extractFn(cfg, r.Slug)(ctx, repoDir, sha)
+		}
 	}
 	return wd, nil
 }

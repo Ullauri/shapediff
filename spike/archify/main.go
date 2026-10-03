@@ -1,7 +1,7 @@
 //go:build spike
 
 // Command archify is the throwaway converter for the period system-map spike
-// (docs/spike-archify-2026-09-24.md). It reads a base graph, a head graph,
+// (docs/spike-period-map-2026-09-24.md). It reads a base graph, a head graph,
 // their delta and a component map, and writes one archify dataflow document:
 // entry-point groups, then the components that host their handlers, then the
 // components they reach, then sinks. It is behind the spike build tag so it

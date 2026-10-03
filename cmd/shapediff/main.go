@@ -16,7 +16,7 @@ import (
 
 // Version is the extractor/tool version recorded in every document and cache
 // key. Bumping it invalidates every cached graph, which is the point.
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 type command struct {
 	name  string

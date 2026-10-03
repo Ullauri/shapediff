@@ -1,0 +1,30 @@
+# shapediff's own CI: what `make check` runs, on every push to master and
+# every pull request. Not to be confused with ci/shapediff.github-workflow.yml,
+# the template other repos copy to run shapediff on their pull requests.
+
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "gofmt needed:"; echo "$out"; exit 1; fi
+
+      - run: make vet test conform

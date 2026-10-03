@@ -3,7 +3,7 @@
 export PATH := $(PATH):/usr/local/go/bin:$(HOME)/go/bin
 export GOFLAGS := -mod=mod
 
-.PHONY: build test vet conform fmt
+.PHONY: build test vet conform fmt check
 
 build:
 	go build -o bin/shapediff ./cmd/shapediff

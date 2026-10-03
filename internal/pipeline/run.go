@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -131,6 +132,9 @@ func Run(ctx context.Context, env Env, deps Deps) (Outcome, error) {
 	d.MRIID = env.MRIID
 	d.Repo = repo
 	d.BaseSHA, d.HeadSHA = out.BaseSHA, out.HeadSHA
+	if len(base.Packages) == 0 {
+		d.Warnings = append(d.Warnings, "base "+shortSHA(out.BaseSHA)+" has no packages, so every definition at head counts as added")
+	}
 	out.Structural = d.Stats.Structural
 
 	// Step 4: always publish the delta, as artifact and in the MR cache.
@@ -229,7 +233,27 @@ func (deps *Deps) graphFor(ctx context.Context, env Env, repo, sha string, isHea
 	}
 	g, err := deps.Extract(ctx, dir, sha)
 	if err != nil {
+		if !isHead && errors.Is(err, graph.ErrNoPackages) {
+			// The base has nothing to extract: the change adds the first
+			// code, or the first go.mod. That is a graph with nothing in
+			// it, not a failure. It is not cached, so a base that is empty
+			// because of a configuration mistake is looked at again once
+			// the mistake is fixed.
+			deps.logf("base %s: %v; every definition at head counts as added", shortSHA(sha), err)
+			return &graph.Document{SchemaVersion: graph.SchemaVersion, Repo: repo, SHA: sha}, nil
+		}
 		return nil, err
+	}
+	if len(g.Packages) == 0 {
+		// An extractor that found nothing and said so with an empty
+		// document rather than an error. At the head that is a failure:
+		// comparing nothing with nothing would read as "no structural
+		// change" for a change the job never looked at.
+		if isHead {
+			return nil, fmt.Errorf("%w in the head graph: the extractor found nothing to extract at %s (is SHAPEDIFF_EXTRACTOR set for this language, and modules: right?)", graph.ErrNoPackages, dir)
+		}
+		deps.logf("base %s has no packages; every definition at head counts as added", shortSHA(sha))
+		return g, nil
 	}
 	if b, err := g.Marshal(); err == nil {
 		if err := deps.Graphs.Put(ctx, key, b); err != nil {

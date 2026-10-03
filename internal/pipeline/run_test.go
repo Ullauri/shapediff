@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,7 +46,18 @@ func (f *fakeNotes) UpdateNote(_ context.Context, _ int, id int, body string) er
 }
 
 func doc(sha string) *graph.Document {
-	d := &graph.Document{SchemaVersion: 1, Repo: "g/s", SHA: sha, Extractor: graph.Extractor{Name: "x", Version: "0.1.0", Precision: "typed", Toolchain: "go", ConfigHash: "c"}}
+	d := &graph.Document{SchemaVersion: 1, Repo: "g/s", SHA: sha, Extractor: graph.Extractor{Name: "x", Version: "0.1.0", Precision: "typed", Toolchain: "go", ConfigHash: "c"},
+		Packages: []graph.Package{{ID: "pkg:g/s/p", LoadStatus: graph.LoadOK}},
+		Nodes:    []graph.Node{{ID: "pkg:g/s/p", Kind: graph.KindPackage, Name: "p", Package: "g/s/p"}}}
+	d.Canonicalize()
+	return d
+}
+
+// emptyDoc is what a plug-in extractor returns for a checkout it found
+// nothing in.
+func emptyDoc(sha string) *graph.Document {
+	d := doc(sha)
+	d.Packages, d.Nodes = nil, nil
 	d.Canonicalize()
 	return d
 }
@@ -182,5 +194,57 @@ func TestNotesAPIFailureIsWarning(t *testing.T) {
 	out, err := Run(context.Background(), env(dir), dp)
 	if err != nil || out.Warning == "" || out.Artifact == "" {
 		t.Fatalf("%+v %v", out, err)
+	}
+}
+
+func TestEmptyBaseCountsAsEverythingAdded(t *testing.T) {
+	dir := t.TempDir()
+	notes := &fakeNotes{notes: map[int]string{}}
+	dp, extracts := deps(t, true, notes)
+	var baseSeen *graph.Document
+	dp.Extract = func(_ context.Context, _ string, sha string) (*graph.Document, error) {
+		*extracts++
+		if sha == "base000000000000" {
+			return nil, fmt.Errorf("%w under /base", graph.ErrNoPackages)
+		}
+		return doc(sha), nil
+	}
+	dp.Delta = func(base, head *graph.Document) (*delta.Delta, error) {
+		baseSeen = base
+		d := &delta.Delta{SchemaVersion: 1}
+		d.Stats.Structural = true
+		return d, nil
+	}
+	out, err := Run(context.Background(), env(dir), dp)
+	if err != nil || out.Warning != "" || !out.Posted {
+		t.Fatalf("an empty base must not fail the job: %+v %v", out, err)
+	}
+	if baseSeen == nil || len(baseSeen.Packages) != 0 || baseSeen.SHA != "base000000000000" {
+		t.Fatalf("delta should see an empty base graph: %+v", baseSeen)
+	}
+	if ed, err := delta.ReadFile(out.Artifact); err != nil || len(ed.Warnings) != 1 || !bytes.Contains([]byte(ed.Warnings[0]), []byte("has no packages")) {
+		t.Fatalf("artifact should say the base was empty: %v %+v", err, ed)
+	}
+	// The empty base is not cached: the next push extracts it again.
+	Run(context.Background(), env(dir), dp)
+	if *extracts != 3 {
+		t.Fatalf("extracts = %d, want 3 (head cached, empty base re-extracted)", *extracts)
+	}
+}
+
+func TestEmptyHeadIsAnExtractionFailure(t *testing.T) {
+	dir := t.TempDir()
+	notes := &fakeNotes{notes: map[int]string{}}
+	dp, _ := deps(t, true, notes)
+	dp.Extract = func(_ context.Context, _ string, sha string) (*graph.Document, error) { return emptyDoc(sha), nil }
+	out, err := Run(context.Background(), env(dir), dp)
+	if err != nil || out.Posted || out.Updated {
+		t.Fatalf("%+v %v", out, err)
+	}
+	if !bytes.Contains([]byte(out.Warning), []byte("no packages")) || out.Artifact == "" {
+		t.Fatalf("an empty head must be reported as a failed extraction with an artifact: %+v", out)
+	}
+	if ed, err := delta.ReadFile(out.Artifact); err != nil || ed.Stats.Structural || len(ed.Warnings) == 0 {
+		t.Fatalf("empty delta artifact: %v %+v", err, ed)
 	}
 }

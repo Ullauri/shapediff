@@ -44,7 +44,7 @@ func TestBaselineRowsAndMap(t *testing.T) {
 	if n := dg.NodeByID(entryGroupID("pkg:acme/svc/orders", "http")); n == nil || n.Kind != KindEntrypoint || n.Label != "POST /orders" {
 		t.Errorf("entry node = %+v", n)
 	}
-	if n := dg.NodeByID(sinkKindID("db")); n == nil || n.Kind != KindSink || n.Label != "db store" {
+	if n := dg.NodeByID(sinkKindID("db")); n == nil || n.Kind != KindSink || n.Label != "store table" {
 		t.Errorf("sink node = %+v", n)
 	}
 	var edges []string

@@ -163,9 +163,9 @@ func (w *work) stepD() bool {
 		delete(w.nodes, id)
 		w.rewireEdges(id, gid)
 	}
-	// Name the group after its package: "17 symbols" costs the same space as
-	// "..." and says as much.
-	gn.Label = fmt.Sprintf("%s +%d more", graph.ShortName(graph.PkgID(first.Package)), gn.CollapsedCount)
+	// Name the group by what it holds and where: "8 new in render", not
+	// "render +8 more", which read like the package box beside it.
+	gn.Label = MoreLabel(gn.CollapsedCount, first.Status, graph.ShortName(graph.PkgID(first.Package)))
 	gn.Members = append([]Node(nil), w.b.collapsedInto[gid]...)
 	return true
 }
@@ -293,7 +293,7 @@ func (b *builder) topB(w *work, B int) *work {
 	}
 	t := w.subset(w.title, keep)
 	if hidden := len(ids) - len(keep); hidden > 0 {
-		t.nodes[hiddenMoreID] = &Node{ID: hiddenMoreID, Kind: KindMore, Label: fmt.Sprintf("+%d more", hidden), Status: StatusContext, priority: prioContext}
+		t.nodes[HiddenMoreID] = &Node{ID: HiddenMoreID, Kind: KindMore, Label: fmt.Sprintf("+%d more", hidden), Status: StatusContext, priority: prioContext}
 		t.hidden = hidden
 	}
 	return t
@@ -624,4 +624,26 @@ func (b *builder) omitted(res *Result) {
 	if res.Omitted.WideReach == nil {
 		res.Omitted.WideReach = []WideReach{}
 	}
+}
+
+// MoreLabel names a group of definitions drawn as one box: how many, what
+// happened to them, and the package when the box stands outside its
+// package's own box ("8 new in render"; inside the box, "8 new").
+func MoreLabel(n int, status, pkg string) string {
+	word := "more"
+	switch status {
+	case StatusAdded:
+		word = "new"
+	case StatusRemoved:
+		word = "removed"
+	case StatusSignatureChanged:
+		word = "signature changed"
+		if n != 1 {
+			word = "signatures changed"
+		}
+	}
+	if pkg == "" {
+		return fmt.Sprintf("%d %s", n, word)
+	}
+	return fmt.Sprintf("%d %s in %s", n, word, pkg)
 }

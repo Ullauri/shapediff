@@ -72,6 +72,9 @@ func Note(in NoteInput) (string, error) {
 	}
 	var b strings.Builder
 	b.WriteString(Marker + "\n")
+	// One line says what this is and what it compares, so a reader who
+	// meets the comment cold is not left to infer it from a heading.
+	fmt.Fprintf(&b, "**shapediff** · what this %s did to the shape of the code · base `%s` → head `%s`\n\n", in.Forge.Change(), short(in.BaseSHA), short(in.HeadSHA))
 	writeSummary(&b, in)
 	// One key, above the first diagram. Under the call paths it was invisible
 	// to a reader of the dataflow diagram, and repeating it per diagram turns
@@ -100,7 +103,7 @@ func Note(in NoteInput) (string, error) {
 			all[i] = &dfs[i]
 		}
 		names := shortNamesOf(all...)
-		b.WriteString("\n#### Dataflow\n")
+		b.WriteString("\n### Dataflow\n")
 		for i := range dfs {
 			dg := dfs[i]
 			fmt.Fprintf(&b, "\n**%s**\n\n", mdEsc(dg.Title))
@@ -111,7 +114,7 @@ func Note(in NoteInput) (string, error) {
 		}
 	}
 	if len(in.Filter.CallPaths) > 0 && len(in.Filter.CallPaths[0].Nodes) > 0 {
-		b.WriteString("\n#### Call paths\n\n")
+		b.WriteString("\n### Call paths\n\n")
 		primary := in.Filter.CallPaths[0]
 		// A split diagram is titled by its entry point; an unsplit one is
 		// titled "call paths", which the heading already says.
@@ -126,6 +129,9 @@ func Note(in NoteInput) (string, error) {
 			}
 		} else {
 			fence(&b, Mermaid(&primary))
+			if c := remainderCaption(&primary); c != "" {
+				b.WriteString(c + "\n")
+			}
 		}
 		b.WriteString("\n" + CallPathBlurb(in, &primary) + "\n")
 		if rest := in.Filter.CallPaths[1:]; len(rest) > 0 {
@@ -134,6 +140,9 @@ func Note(in NoteInput) (string, error) {
 				dg := rest[i]
 				fmt.Fprintf(&b, "**%s**\n\n", mdEsc(dg.Title))
 				fence(&b, Mermaid(&dg))
+				if c := remainderCaption(&dg); c != "" {
+					b.WriteString(c + "\n")
+				}
 				b.WriteString("\n" + CallPathBlurb(in, &dg) + "\n\n")
 			}
 			b.WriteString("</details>\n")
@@ -141,12 +150,13 @@ func Note(in NoteInput) (string, error) {
 	}
 	writeStacks(&b, in)
 	if in.Filter.Wiring != nil {
-		b.WriteString("\n#### Module wiring\n\n")
+		b.WriteString("\n### Module wiring\n\n")
 		fence(&b, Mermaid(in.Filter.Wiring))
 	}
 	fmt.Fprintf(&b, "\n<details><summary>%s</summary>\n\n", detailsSummary(in))
-	writeNodeTable(&b, in)
-	writeLists(&b, in)
+	labels := itemLabels(in)
+	writeNodeTable(&b, in, labels)
+	writeLists(&b, in, labels)
 	fmt.Fprintf(&b, "\nextractor %s %s (%s, %s), base %s, head %s, %s\n", in.Extractor.Name, in.Extractor.Version, in.Extractor.Precision, in.Extractor.Toolchain, short(in.BaseSHA), short(in.HeadSHA), in.Elapsed.Round(time.Millisecond))
 	b.WriteString("</details>\n")
 	if in.WeeklyURL != "" {
@@ -155,29 +165,60 @@ func Note(in NoteInput) (string, error) {
 	return b.String(), nil
 }
 
+// maxOpenRows is how many definitions a count in "What it did" shows as
+// rows before the rest are folded under one "N more" row. Twenty
+// disclosure triangles in a column were a wall; eight is a screen.
+const maxOpenRows = 8
+
 // writeSummary is the top of the note: what changed, as a list. It was a
 // line of counts and a paragraph naming the changes, and both had to be
-// read across to find anything; a list is scanned down.
+// read across to find anything; a list is scanned down. The counts come
+// first and the packages they happened in second: a reviewer asks what
+// the change did before asking what each package is for.
 func writeSummary(b *strings.Builder, in NoteInput) {
-	b.WriteString("#### What changed\n")
+	b.WriteString("### What changed\n")
 	if in.Suppression != "" {
 		fmt.Fprintf(b, "\n%s\n", in.Suppression)
 	}
-	writeTouches(b, in)
 	if len(in.Summary) > 0 {
+		if code, tests := touchGroups(in); len(code)+len(tests) > 0 {
+			// "What it touches" follows the list, so the list is labelled too.
+			b.WriteString("\n**What it did**\n")
+		}
 		b.WriteString("\n")
 		labels := itemLabels(in)
 		for _, s := range in.Summary {
 			fmt.Fprintf(b, "- %s\n", s.Text)
 			opens := false
+			rows, folded := 0, false
+			openable := 0
+			for _, id := range s.IDs {
+				if id != "" {
+					openable++
+				}
+			}
 			for i, it := range s.Items {
 				id := ""
 				if i < len(s.IDs) {
 					id = s.IDs[i]
 				}
 				switch {
+				case id != "" && rows >= maxOpenRows:
+					if !folded {
+						// The rest, behind one line, one per line with its
+						// permalink: a reader who wants them opens one
+						// thing; one who does not is spared a column of
+						// triangles. Compact, because a note is bounded by
+						// the forge's comment size, and the eight rows
+						// above already carry the ones that matter most.
+						fmt.Fprintf(b, "\n  <details><summary>%d more</summary>\n\n", openable-rows)
+						folded = true
+					}
+					fmt.Fprintf(b, "  - %s\n", compactItem(in, it, id))
+					rows++
 				case id != "":
 					opens = writeItem(b, in, it, id, labels, opens) || opens
+					rows++
 				case opens:
 					// "and N more" under rows that open: a line, not a
 					// bullet among disclosure triangles
@@ -186,11 +227,15 @@ func writeSummary(b *strings.Builder, in NoteInput) {
 					fmt.Fprintf(b, "  - %s\n", it)
 				}
 			}
+			if folded {
+				b.WriteString("\n  </details>\n")
+			}
 		}
 	}
 	if in.Unchanged != "" {
 		fmt.Fprintf(b, "\n%s\n", in.Unchanged)
 	}
+	writeTouches(b, in)
 }
 
 // writeBaseline is the "Where this lands" section (spec 10.1): one line
@@ -202,7 +247,7 @@ func writeSummary(b *strings.Builder, in NoteInput) {
 // the map when the map is drawn.
 func writeBaseline(b *strings.Builder, in NoteInput, key string) {
 	bl := in.Baseline
-	b.WriteString("\n#### Where this lands\n\n")
+	b.WriteString("\n### Where this lands\n\n")
 	fmt.Fprintf(b, "At base %s the repo has %d %s, %d %s and %d %s",
 		short(in.BaseSHA), bl.Packages, plural(bl.Packages, "package", "packages"),
 		bl.Entrypoints, plural(bl.Entrypoints, "entry point", "entry points"),
@@ -258,13 +303,12 @@ func writeBaseline(b *strings.Builder, in NoteInput, key string) {
 	}
 }
 
-// maxNamed is how many definitions a package's list item names per kind
-// of change before "and N more".
-const maxNamed = 5
-
 // writeTouched is one package of "Where this lands": its name and size,
-// then one line per kind of change naming what changed, then who depends
-// on it and what it talks to. A line with nothing to say is left out.
+// then one line per kind of change counting what changed, then who depends
+// on it and what it talks to. A line with nothing to say is left out. The
+// names are not repeated here: "What it did" names every one of them, with
+// the package beside each, and the Details table links them; a second
+// copy grouped by package doubled the length of the note.
 // folded says "What it touches" already opens to the package's place in
 // the repo, so those last lines would repeat it.
 func writeTouched(b *strings.Builder, in NoteInput, t filter.TouchedPackage, folded bool) {
@@ -312,11 +356,7 @@ func writeTouched(b *strings.Builder, in NoteInput, t filter.TouchedPackage, fol
 		if c.n == 0 {
 			continue
 		}
-		line := fmt.Sprintf("%d %s", c.n, c.what)
-		if names := namedList(c.ids, t.RenamedFrom); names != "" {
-			line += ": " + names
-		}
-		fmt.Fprintf(b, "  - %s\n", line)
+		fmt.Fprintf(b, "  - %d %s\n", c.n, c.what)
 	}
 	if folded {
 		return
@@ -347,24 +387,6 @@ func placeFacts(in NoteInput, t filter.TouchedPackage) []string {
 	return out
 }
 
-// namedList names up to maxNamed definitions, "`Old` → `New`" for a
-// rename, then "and N more".
-func namedList(ids []string, from map[string]string) string {
-	var parts []string
-	for i, id := range ids {
-		if i == maxNamed {
-			parts = append(parts, fmt.Sprintf("and %d more", len(ids)-maxNamed))
-			break
-		}
-		part := "`" + mdEsc(graph.ShortName(id)) + "`"
-		if f, ok := from[id]; ok {
-			part = "`" + mdEsc(graph.ShortName(f)) + "` → " + part
-		}
-		parts = append(parts, part)
-	}
-	return strings.Join(parts, ", ")
-}
-
 // shortList renders up to max names from IDs, then "+N"; "—" when empty.
 // Sinks carry their kind so a table named like a package reads
 // unambiguously; an entry point the MR added or removed says so, since
@@ -379,13 +401,10 @@ func shortList(ids []string, max int, status map[string]string) string {
 			parts = append(parts, fmt.Sprintf("+%d", len(ids)-max))
 			break
 		}
-		name := graph.ShortName(id)
+		part := "`" + mdEsc(graph.ShortName(id)) + "`"
 		if graph.IDPrefix(id) == "sink" {
-			if p := strings.SplitN(id, ":", 3); len(p) == 3 {
-				name = p[1] + " " + p[2]
-			}
+			part = sinkPhrase(id)
 		}
-		part := "`" + mdEsc(name) + "`"
 		switch status[id] {
 		case "added":
 			part += " (new)"
@@ -417,7 +436,7 @@ func detailsSummary(in NoteInput) string {
 		n         int
 		one, many string
 	}{
-		{len(nodeRows(in)), "node", "nodes"}, // the table's own word; not every row is a definition
+		{len(nodeRows(in)), "drawn item", "drawn items"}, // definitions, entry points and sinks alike
 		{len(in.Delta.Nodes.Renamed), "rename", "renames"},
 		{len(om.BodyOnly), "body-only change", "body-only changes"},
 		{len(om.WideReach), "wide-reach change", "wide-reach changes"},
@@ -461,20 +480,20 @@ func nodeRows(in NoteInput) []filter.Node {
 	return rows
 }
 
-func writeNodeTable(b *strings.Builder, in NoteInput) {
+func writeNodeTable(b *strings.Builder, in NoteInput, labels map[string]string) {
 	rows := nodeRows(in)
 	if len(rows) == 0 {
 		return
 	}
 	// The node is its own link: a separate link column spent a third of
 	// the width on file:line text and squeezed the names into a sliver.
-	b.WriteString("| node | status | package |\n|---|---|---|\n")
+	b.WriteString("| definition | status | package |\n|---|---|---|\n")
 	for _, n := range rows {
 		name := "`" + mdEsc(Label(n)) + "`"
 		if u := permalinkURL(in, n.Status, n.File, n.Line); u != "" {
 			name = "[" + name + "](" + u + ")"
 		}
-		b.WriteString("| " + name + " | " + tableStatus(n.Status) + " | " + tablePackage(n) + " |\n")
+		b.WriteString("| " + name + " | " + tableStatus(n.Status) + " | " + tablePackage(n, labels) + " |\n")
 	}
 }
 
@@ -495,20 +514,60 @@ func tableStatus(status string) string {
 	return strings.ReplaceAll(status, "_", " ")
 }
 
-// tablePackage is the package cell. An entry point or a sink has no
+// tablePackage is the package cell, by the label the rest of the note
+// uses for the package (a full import path in a narrow column was the one
+// place the note still spelled it out). An entry point or a sink has no
 // package, and an empty cell read as missing data; it says what the node
-// is instead, a sink by its kind as the summary list writes it.
-func tablePackage(n filter.Node) string {
+// is instead.
+func tablePackage(n filter.Node, labels map[string]string) string {
 	switch n.Kind {
 	case filter.KindEntrypoint:
 		return "_entry point_"
 	case filter.KindSink:
 		if p := strings.SplitN(n.ID, ":", 3); len(p) == 3 {
-			return "_" + mdEsc(p[1]) + " sink_"
+			return "_" + sinkWord(p[1], 1) + "_"
 		}
 		return "_sink_"
 	}
-	return mdEsc(n.Package)
+	return mdEsc(pkgLabel(labels, n.Package))
+}
+
+// pkgLabel is the note's label for a package: the one the change list
+// uses, else the last path segment.
+func pkgLabel(labels map[string]string, pkg string) string {
+	if l, ok := labels[pkg]; ok && l != "" {
+		return l
+	}
+	return shortPkg(pkg)
+}
+
+// sinkWord is what a sink of a kind is called, in a reviewer's words.
+func sinkWord(kind string, n int) string {
+	one, many := strings.ReplaceAll(kind, "_", " "), strings.ReplaceAll(kind, "_", " ")+"s"
+	switch kind {
+	case "db":
+		one, many = "table", "tables"
+	case "http_client":
+		one, many = "HTTP client", "HTTP clients"
+	case "fs":
+		one, many = "file store", "file stores"
+	}
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// sinkPhrase names a sink in prose: "`orders` table", "`http` (HTTP client)".
+func sinkPhrase(id string) string {
+	p := strings.SplitN(id, ":", 3)
+	if len(p) != 3 {
+		return "`" + mdEsc(graph.ShortName(id)) + "`"
+	}
+	if p[1] == "db" {
+		return "`" + mdEsc(p[2]) + "` table"
+	}
+	return "`" + mdEsc(p[2]) + "` (" + sinkWord(p[1], 1) + ")"
 }
 
 // Permalink returns a markdown link to the node's file at the head SHA (base
@@ -533,7 +592,7 @@ func permalinkURL(in NoteInput, status, file string, line int) string {
 	return in.Forge.Blob(in.ProjectURL, sha, file, line)
 }
 
-func writeLists(b *strings.Builder, in NoteInput) {
+func writeLists(b *strings.Builder, in NoteInput, labels map[string]string) {
 	d := in.Delta
 	if len(d.Nodes.Renamed) > 0 {
 		b.WriteString("\n**Renames**\n\n")
@@ -553,7 +612,9 @@ func writeLists(b *strings.Builder, in NoteInput) {
 	if len(in.Filter.Omitted.BodyOnly) > 0 {
 		b.WriteString("\n**Body-only changes**\n\n")
 		for _, id := range in.Filter.Omitted.BodyOnly {
-			fmt.Fprintf(b, "- `%s`\n", mdEsc(strings.TrimPrefix(id, "sym:")))
+			// Named as the change list names things: a short name and the
+			// package's label, not the raw ID.
+			fmt.Fprintf(b, "- `%s` in `%s`\n", mdEsc(graph.ShortName(id)), mdEsc(pkgLabel(labels, graph.SymPackage(id))))
 		}
 	}
 	if len(in.Filter.Omitted.WideReach) > 0 {
@@ -574,8 +635,24 @@ func writeLists(b *strings.Builder, in NoteInput) {
 		}
 	}
 	om := in.Filter.Omitted
-	if om.HiddenNodes+om.CollapsedSymbols+om.ExcludedGenerated+om.ExcludedTest+om.ExcludedTestPackages+len(om.Orphans) > 0 {
-		fmt.Fprintf(b, "\n%d nodes hidden by the budget, %d on no drawn path, %d definitions collapsed into packages, %d generated and %d test definitions not drawn, %d test packages left out of the wiring.\n", om.HiddenNodes, len(om.Orphans), om.CollapsedSymbols, om.ExcludedGenerated, om.ExcludedTest, om.ExcludedTestPackages)
+	// Only the counts that are not zero, as the top of the note does: a
+	// line of zeros is read once and skipped ever after.
+	var cut []string
+	add := func(n int, s string) {
+		if n > 0 {
+			cut = append(cut, fmt.Sprintf(s, n))
+		}
+	}
+	add(om.HiddenNodes, "%d hidden by the budget")
+	add(len(om.Orphans), "%d on no drawn path")
+	add(om.CollapsedSymbols, "%d collapsed into packages")
+	add(om.ExcludedGenerated, "%d generated not drawn")
+	add(om.ExcludedTest, "%d in tests not drawn")
+	if n := om.ExcludedTestPackages; n > 0 {
+		cut = append(cut, fmt.Sprintf("%d test %s left out of the wiring", n, plural(n, "package", "packages")))
+	}
+	if len(cut) > 0 {
+		b.WriteString("\nDefinitions not shown: " + strings.Join(cut, ", ") + ".\n")
 	}
 	if len(d.Warnings) > 0 {
 		b.WriteString("\n**Warnings**\n\n")
@@ -619,4 +696,62 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// remainderCaption says, under a diagram, how much the budget left out of
+// it, in place of the edgeless "+N more" box the diagram used to draw: a
+// box with no arrows was the one thing in the picture a reader could not
+// place, and it reused a label the key gave another meaning.
+func remainderCaption(dg *filter.Diagram) string {
+	for _, n := range dg.Nodes {
+		if n.ID == filter.HiddenMoreID {
+			more := strings.TrimSuffix(strings.TrimPrefix(n.Label, "+"), " more")
+			return fmt.Sprintf("%s more %s left out to fit; the Details table lists them.", more, plural(atoi(more), "definition was", "definitions were"))
+		}
+	}
+	return ""
+}
+
+func atoi(s string) int {
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return -1
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
+// compactItem is a folded definition on one line: the item's text and a
+// permalink to its line, when the graphs know where it is.
+func compactItem(in NoteInput, text, id string) string {
+	ix := in.Head
+	status := ""
+	if isRemoved(in.Delta, id) {
+		ix, status = in.Base, filter.StatusRemoved
+	}
+	if ix == nil {
+		return text
+	}
+	n := ix.Node(id)
+	if n == nil || n.File == "" {
+		return text
+	}
+	if u := permalinkURL(in, status, n.File, n.Line); u != "" {
+		return fmt.Sprintf("%s · [%s:%d](%s)", text, mdEsc(n.File), n.Line, u)
+	}
+	return fmt.Sprintf("%s · %s:%d", text, mdEsc(n.File), n.Line)
+}
+
+func isRemoved(d *delta.Delta, id string) bool {
+	if d == nil {
+		return false
+	}
+	for _, r := range d.Nodes.Removed {
+		if r == id {
+			return true
+		}
+	}
+	return false
 }

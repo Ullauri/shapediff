@@ -77,7 +77,7 @@ func Unchanged(d *delta.Delta) string {
 	s := d.Stats
 	var parts []string
 	if s.EntrypointsAdded == 0 {
-		parts = append(parts, "no endpoint was added")
+		parts = append(parts, "no entry point was added")
 	}
 	if s.EntrypointsReachChanged == 0 {
 		wide := 0
@@ -88,13 +88,13 @@ func Unchanged(d *delta.Delta) string {
 		}
 		switch {
 		case wide == 0:
-			parts = append(parts, "no endpoint's reach changed")
+			parts = append(parts, "no entry point's reach changed")
 		default:
 			// Reach through a call with many possible targets is listed
 			// under Details, not drawn (section 7.4); on a program whose
 			// entry point is a command dispatching through a table, it is
 			// the only reach there is, and "no reach changed" would be false.
-			parts = append(parts, fmt.Sprintf("no endpoint's reach changed except through calls with many possible targets (%d %s, under Details)", wide, plural(wide, "endpoint", "endpoints")))
+			parts = append(parts, fmt.Sprintf("no entry point's reach changed except through calls with many possible targets (%d %s, under Details)", wide, plural(wide, "entry point", "entry points")))
 		}
 	}
 	if s.SignaturesChanged == 0 {
@@ -188,7 +188,7 @@ func entrypointsAdded(d *delta.Delta) Sentence {
 	for _, id := range ids {
 		s.Claims = append(s.Claims, Claim{SubjectID: id, Predicate: PredAdded, Sentence: s.Text})
 	}
-	s.Lead = fmt.Sprintf("**%d %s added**", len(ids), plural(len(ids), "endpoint", "endpoints"))
+	s.Lead = fmt.Sprintf("**%d %s added**", len(ids), plural(len(ids), "entry point", "entry points"))
 	reach := map[string][]string{}
 	for _, ep := range d.Entrypoints {
 		if ep.Status == delta.EPAdded {
@@ -218,7 +218,7 @@ func entrypointsRemoved(d *delta.Delta) Sentence {
 	for _, id := range ids {
 		s.Claims = append(s.Claims, Claim{SubjectID: id, Predicate: PredRemoved, Sentence: s.Text})
 	}
-	s.Lead = fmt.Sprintf("**%d %s removed**", len(ids), plural(len(ids), "endpoint", "endpoints"))
+	s.Lead = fmt.Sprintf("**%d %s removed**", len(ids), plural(len(ids), "entry point", "entry points"))
 	s.Items = items(ids, name)
 	return s
 }
@@ -262,7 +262,7 @@ func reachChanged(d *delta.Delta) Sentence {
 		s.Claims[i].Sentence = s.Text
 	}
 	if n := len(s.Items); n > 0 {
-		s.Lead = fmt.Sprintf("**%d %s reach changed**", n, possessive(n, "endpoint"))
+		s.Lead = fmt.Sprintf("**%d %s reach changed**", n, possessive(n, "entry point"))
 		if n > MaxItems {
 			s.Items = append(s.Items[:MaxItems], fmt.Sprintf("and %d more", n-MaxItems))
 		}
@@ -282,11 +282,24 @@ func signatures(d *delta.Delta, head *graph.Index, labels map[string]string) Sen
 		ids = append(ids, sc.ID)
 	}
 	where := wherer(ids, head, labels)
-	for _, sc := range d.Nodes.SignatureChanged {
-		callers := 0
-		if head != nil {
-			callers = len(head.CallerIDs(sc.ID))
+	// The most-called signature first: it is the one whose change the
+	// most code has to absorb, which is what a reviewer weighs first.
+	changes := append([]delta.SignatureChange(nil), d.Nodes.SignatureChanged...)
+	callersOf := func(id string) int {
+		if head == nil {
+			return 0
 		}
+		return len(head.CallerIDs(id))
+	}
+	sort.SliceStable(changes, func(i, j int) bool {
+		ci, cj := callersOf(changes[i].ID), callersOf(changes[j].ID)
+		if ci != cj {
+			return ci > cj
+		}
+		return changes[i].ID < changes[j].ID
+	})
+	for _, sc := range changes {
+		callers := callersOf(sc.ID)
 		parts = append(parts, fmt.Sprintf("%s changed signature (%d %s)", name(sc.ID), callers, plural(callers, "caller", "callers")))
 		s.Claims = append(s.Claims, Claim{SubjectID: sc.ID, Predicate: PredSignatureChanged})
 		who := "no callers"
@@ -303,10 +316,7 @@ func signatures(d *delta.Delta, head *graph.Index, labels map[string]string) Sen
 	}
 	n := len(d.Nodes.SignatureChanged)
 	s.Lead = fmt.Sprintf("**%d %s changed**, %d %s in all", n, plural(n, "signature", "signatures"), total, plural(total, "caller", "callers"))
-	if len(s.Items) > MaxItems {
-		s.Items = append(s.Items[:MaxItems], fmt.Sprintf("and %d more", len(s.Items)-MaxItems))
-		s.ItemIDs = append(s.ItemIDs[:MaxItems], "")
-	}
+	// No cap: the note folds the rows past its own limit.
 	return s
 }
 
@@ -512,8 +522,45 @@ func kindList(ids []string, ix *graph.Index, verb, tail string, labels map[strin
 	if len(named) == 0 {
 		return lead, nil, nil
 	}
-	its, ids := itemsWithIDs(named, wherer(named, ix, labels))
+	its, ids := rankedItems(named, ix, wherer(named, ix, labels))
 	return lead, its, ids
+}
+
+// rankedItems renders every definition, in the order a reviewer wants
+// them: exported ones first, then the ones with the most callers outside
+// the tests, then by name. Alphabetical order put an unexported helper
+// first and the new API under "and N more". No cap here: the note folds
+// the rows past its own limit, so a name is never dropped.
+func rankedItems(ids []string, ix *graph.Index, render func(string) string) ([]string, []string) {
+	ids = append([]string(nil), ids...)
+	exported, callers := map[string]bool{}, map[string]int{}
+	for _, id := range ids {
+		if ix == nil {
+			continue
+		}
+		if n := ix.Node(id); n != nil {
+			exported[id] = visible(n)
+		}
+		for _, c := range ix.CallerIDs(id) {
+			if cn := ix.Node(c); cn != nil && !cn.Attrs.Test {
+				callers[id]++
+			}
+		}
+	}
+	sort.SliceStable(ids, func(i, j int) bool {
+		if exported[ids[i]] != exported[ids[j]] {
+			return exported[ids[i]]
+		}
+		if callers[ids[i]] != callers[ids[j]] {
+			return callers[ids[i]] > callers[ids[j]]
+		}
+		return ids[i] < ids[j]
+	})
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, render(id))
+	}
+	return out, ids
 }
 
 func suppressed(d *delta.Delta) Sentence {
@@ -542,10 +589,26 @@ func name(id string) string {
 	if graph.IDPrefix(id) == "sink" {
 		parts := strings.SplitN(id, ":", 3)
 		if len(parts) == 3 {
-			return "`" + parts[2] + "` (" + parts[1] + " sink)"
+			// In a reviewer's words, as the rest of the note names sinks:
+			// a table is a table, anything else says what kind of thing it is.
+			if parts[1] == "db" {
+				return "the `" + parts[2] + "` table"
+			}
+			return "`" + parts[2] + "` (" + sinkKindWord(parts[1]) + ")"
 		}
 	}
 	return "`" + graph.ShortName(id) + "`"
+}
+
+// sinkKindWord is a sink kind in words: "HTTP client" for http_client.
+func sinkKindWord(kind string) string {
+	switch kind {
+	case "http_client":
+		return "HTTP client"
+	case "fs":
+		return "file store"
+	}
+	return strings.ReplaceAll(kind, "_", " ")
 }
 
 // wherer names definitions with their package, "`Create` in `orders`",
@@ -652,3 +715,25 @@ var blocklist = regexp.MustCompile(`(?i)\b(should|bug|bugs|risk|risks|risky|viol
 
 // Evaluative reports whether the sentence trips the blocklist.
 func Evaluative(text string) bool { return blocklist.MatchString(text) }
+
+// visible reports whether a definition is part of the package's API: its
+// name is exported and, for a method, so is its receiver type. A method
+// called Len on an unexported heap type is exported by the letter of the
+// rule and nobody's API.
+func visible(n *graph.Node) bool {
+	if !n.Attrs.Exported {
+		return false
+	}
+	recv, _, ok := strings.Cut(n.Name, ").")
+	if !ok {
+		recv, _, ok = strings.Cut(n.Name, ".")
+		if !ok {
+			return true
+		}
+	}
+	recv = strings.TrimLeft(recv, "(*")
+	if i := strings.IndexByte(recv, '['); i >= 0 {
+		recv = recv[:i]
+	}
+	return recv != "" && strings.ToUpper(recv[:1]) == recv[:1]
+}

@@ -138,6 +138,26 @@ section.
   (`goextract.swagDoc`), and `render.swagMD` prints the parts on their own
   lines under bold labels, escaping each part as its call site escapes
   any doc.
+- **The note reads top-down in a reviewer's order (14.1).** It opens with
+  one line saying what it is and what it compares, then "What it did" (the
+  counts, with the definitions under each), then "What it touches" (what
+  each package is for), then "Where this lands". The counts come first
+  because a reviewer asks what the change did before asking what each
+  package is for. Under a count, definitions are ranked exported first,
+  then by callers outside the tests, then by name, so the new API is
+  named before the helpers; eight open as rows and the rest fold under one
+  "N more" line, one per line with a permalink, so a name is never
+  dropped and the note stays inside the forge's comment size. "Where this
+  lands" counts a package's changes without naming them again. The key
+  keeps its colour line in view and folds the shapes and arrows; grouping
+  boxes in the diagrams are neutral grey, since Mermaid's default yellow
+  read as the amber of a signature change; a group of definitions drawn as
+  one box is labelled by what it holds ("8 new in render"), and what the
+  budget left out is a caption under the diagram rather than a box with no
+  arrows. Section headings are `###`, so they outrank the bold counts
+  under them. Sinks are named in words everywhere ("`orders` table",
+  "`http` (HTTP client)"), packages by the note's one label, and the
+  Details footer prints only the counts that are not zero.
 - **Every definition in "What it did" opens (14.1, like 10.3).** An item
   that names a definition ("`_meta_title` in `reading`") is a collapsed
   row, the same disclosure the call stacks use. Opened, it shows the

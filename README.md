@@ -124,9 +124,11 @@ of adding a new one. Only the per-PR job runs on GitHub. The weekly job
 needs GitLab, because it lists merged MRs and writes a wiki page.
 
 Either way, the job never blocks a merge. `post` exits 0 on every runtime
-failure, and it always publishes the delta as a job artifact, so a person or
-an automated reviewer can tell "nothing structural" apart from "did not
-run".
+failure, and it always publishes the delta as a job artifact, with an
+`outcome` field (`ok` or `failed`, with the reason) so a person or an
+automated reviewer can tell "nothing structural" apart from "did not
+run". The note it posted, or would have posted, is published beside it as
+`shapediff/note.md`.
 
 You can also run the GitHub job by hand against any pull request. Set the
 variables Actions would set:
@@ -138,17 +140,30 @@ variables Actions would set:
 - `GITHUB_WORKSPACE`: a checkout of the head
 - `SHAPEDIFF_TOKEN=$(gh auth token)`
 
-Then run `shapediff post --dry-run` first. Without `--dry-run`, the comment
-is posted as the user who owns the token.
+Then run `shapediff post --dry-run` first: it does everything but post,
+writes the note it would post to `shapediff/note.md` and the delta to
+`shapediff/delta.json`, and says whether the comment would be created or
+updated. Without `--dry-run`, the comment is posted as the user who owns
+the token.
 
 ## Configuration
 
 Every field is optional. [`.shapediff.example.yml`](.shapediff.example.yml)
-shows the defaults: module roots for monorepos, ignore globs, extra
-entry-point and sink patterns, the diagram budget, and narration. Narration
-is `template` by default. Setting it to `llm` sends the template sentences
-through any OpenAI-compatible endpoint, and a validator rejects any sentence
-that is not backed by the delta. Spec section 13 documents each field.
+shows every field at its default: module roots for monorepos, ignore globs,
+extra entry-point and sink patterns, the diagram budget, and narration. A
+key the config does not have is an error, so a misspelled key cannot pass
+for an omitted one. `extract`, `delta`, `render` and `post` all read
+`.shapediff.yml` from the repo root (`--config` overrides), so a note
+rendered locally matches the one CI posts. Spec section 13 documents each
+field.
+
+Narration is `template` by default. Setting it to `llm` sends the template
+sentences through an OpenAI-compatible endpoint, and a validator rejects
+any sentence that is not backed by the delta. The endpoint is configured
+by the CI environment, never by the repo: `SHAPEDIFF_LLM_ENDPOINT` (an
+https URL, or http on the CI host itself), `SHAPEDIFF_LLM_MODEL` and
+`SHAPEDIFF_LLM_KEY`. A repo config travels with the change under review,
+so it must not be able to choose where a CI secret is sent.
 
 ## Commands
 

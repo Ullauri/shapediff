@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Ullauri/shapediff/internal/config"
@@ -34,10 +37,10 @@ func renderNote(d *delta.Delta, head, base *graph.Index, cfg *config.Config, pro
 	sentences := narrate.Template(d, head, base)
 	if cfg.Narration != "off" {
 		if cfg.Narration == "llm" {
-			if cfg.LLM.Endpoint == "" {
-				warnings = append(warnings, "narration: llm requested but no llm.endpoint configured; using the template")
+			client, why := llmClient(os.Getenv)
+			if client == nil {
+				warnings = append(warnings, why)
 			} else {
-				client := narrate.OpenAIClient{Endpoint: cfg.LLM.Endpoint, Model: cfg.LLM.Model, APIKey: os.Getenv(cfg.LLM.APIKeyEnv)}
 				ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 				rewritten, err := narrate.Rewrite(ctx, client, sentences, d, head, base)
 				cancel()
@@ -79,7 +82,7 @@ func runRender(args []string) error {
 	deltaPath := fs.String("delta", "", "delta document (required)")
 	headPath := fs.String("head", "", "head graph (required)")
 	basePath := fs.String("base", "", "base graph (required)")
-	cfgPath := fs.String("config", "", "repo config (.shapediff.yml); defaults when absent")
+	cfgPath := fs.String("config", config.FileName, "repo config; defaults when the file is absent")
 	projectURL := fs.String("project-url", "", "project web URL for permalinks")
 	forgeName := fs.String("forge", "", "gitlab or github: the permalink shape and what the note calls the change (default: from --project-url, github.com is github)")
 	weeklyURL := fs.String("weekly-url", "", "URL of the weekly structure brief; overrides weekly_url in the config")
@@ -112,7 +115,7 @@ func runRender(args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load(*cfgPath)
+	cfg, err := loadConfig(*cfgPath)
 	if err != nil {
 		return err
 	}
@@ -151,6 +154,32 @@ func runRender(args []string) error {
 	}
 	_, err = io.WriteString(w, note)
 	return err
+}
+
+// llmClient builds the narration rewrite client (spec 11) from the CI
+// environment, and only from there. The repo config travels with the change
+// under review, so letting it name the endpoint, or the variable holding the
+// key, would let any branch send a CI secret to a server of its choosing.
+// The endpoint must be https, or http on the CI host itself (a local model
+// is the spec's own example). Nil and a reason means "use the template".
+func llmClient(get func(string) string) (narrate.Client, string) {
+	endpoint := strings.TrimSpace(get("SHAPEDIFF_LLM_ENDPOINT"))
+	if endpoint == "" {
+		return nil, "narration: llm requested but SHAPEDIFF_LLM_ENDPOINT is not set in the environment; using the template"
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" || !(u.Scheme == "https" || (u.Scheme == "http" && isLoopback(u.Hostname()))) {
+		return nil, fmt.Sprintf("narration: SHAPEDIFF_LLM_ENDPOINT must be an https URL, or http on localhost, got %q; using the template", endpoint)
+	}
+	return narrate.OpenAIClient{Endpoint: endpoint, Model: get("SHAPEDIFF_LLM_MODEL"), APIKey: get("SHAPEDIFF_LLM_KEY")}, ""
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // forgeFor is the --forge flag, or the forge the project URL is on.

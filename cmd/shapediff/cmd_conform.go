@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Ullauri/shapediff/internal/config"
 	"github.com/Ullauri/shapediff/internal/conform"
 	"github.com/Ullauri/shapediff/internal/goextract"
 	"github.com/Ullauri/shapediff/internal/graph"
@@ -73,7 +72,7 @@ func runConform(args []string) error {
 // builtinExtractor adapts the Go extractor to the plug-in contract.
 func builtinExtractor() conform.Extractor {
 	return conform.Func{Label: "builtin go-xtools " + Version, Fn: func(ctx context.Context, repoDir, configPath string) (*graph.Document, error) {
-		cfg, err := config.Load(configPath)
+		cfg, err := loadConfig(configPath)
 		if err != nil {
 			return nil, err
 		}

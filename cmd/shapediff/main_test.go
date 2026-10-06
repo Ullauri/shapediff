@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/Ullauri/shapediff/internal/narrate"
 )
 
 // capture runs the CLI with args and returns its exit code, stdout and
@@ -97,6 +99,25 @@ func TestParseWeekTakesTheTitlesForm(t *testing.T) {
 		}
 		if err != nil || got.Format("2006-01-02") != want {
 			t.Errorf("%s: got %v %v, want %s", in, got, err, want)
+		}
+	}
+}
+
+func TestLLMClientComesOnlyFromTheEnvironment(t *testing.T) {
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	if c, why := llmClient(env(nil)); c != nil || !strings.Contains(why, "SHAPEDIFF_LLM_ENDPOINT") {
+		t.Errorf("no endpoint: client %v, reason %q", c, why)
+	}
+	for _, bad := range []string{"http://attacker.example/v1", "ftp://x/y", "not a url", "https://"} {
+		if c, why := llmClient(env(map[string]string{"SHAPEDIFF_LLM_ENDPOINT": bad})); c != nil || why == "" {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+	for _, ok := range []string{"https://llm.example/v1/chat/completions", "http://localhost:8080/v1", "http://127.0.0.1:11434/v1"} {
+		c, why := llmClient(env(map[string]string{"SHAPEDIFF_LLM_ENDPOINT": ok, "SHAPEDIFF_LLM_MODEL": "m", "SHAPEDIFF_LLM_KEY": "k"}))
+		oc, isOpenAI := c.(narrate.OpenAIClient)
+		if !isOpenAI || why != "" || oc.Endpoint != ok || oc.Model != "m" || oc.APIKey != "k" {
+			t.Errorf("%q: client %#v, reason %q", ok, c, why)
 		}
 	}
 }

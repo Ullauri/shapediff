@@ -91,11 +91,16 @@ jobs:
           "$RUNNER_TEMP/bin/shapediff" post
 
       # Always published, structural or not, so a reader (or an agent
-      # reviewer) can tell "nothing structural" from "the job did not run".
+      # reviewer) can tell "nothing structural" from "the job did not run":
+      # delta.json carries an outcome field, and note.md is the note the
+      # job posted, or would have posted when the token cannot comment.
+      # Neither file means post never ran, which is worth a warning.
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: shapediff-delta
-          path: shapediff/delta.json
+          path: |
+            shapediff/delta.json
+            shapediff/note.md
           retention-days: 90
-          if-no-files-found: ignore
+          if-no-files-found: warn

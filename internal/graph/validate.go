@@ -34,6 +34,9 @@ func Validate(d *Document) []string {
 	if !d.IsCanonical() {
 		add("document is not in canonical order (packages and nodes by id, edges by from,to,kind, no duplicates)")
 	}
+	if len(d.Packages) == 0 {
+		add("document has no packages: nothing was extracted")
+	}
 
 	// packages
 	pkgs := make(map[string]string, len(d.Packages))

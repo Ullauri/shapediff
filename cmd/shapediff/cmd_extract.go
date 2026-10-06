@@ -47,7 +47,7 @@ func runExtract(args []string) error {
 			return fmt.Errorf("external extractor output violates the schema:\n  %s", strings.Join(probs, "\n  "))
 		}
 	} else {
-		cfg, err := config.Load(*cfgPath)
+		cfg, err := loadConfig(*cfgPath)
 		if err != nil {
 			return err
 		}

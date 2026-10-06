@@ -16,20 +16,33 @@ import (
 // SchemaVersion of the delta document.
 const SchemaVersion = 1
 
+// Outcome values: how the run that wrote the document ended. A reader of
+// the artifact (the agent reviewer of spec section 2) needs this to tell
+// "nothing structural" from "the job did not get as far as a delta".
+const (
+	OutcomeOK     = "ok"     // the delta was computed
+	OutcomeFailed = "failed" // it was not; Reason says why, and the delta is empty
+)
+
 // Delta is one delta document.
 type Delta struct {
-	SchemaVersion int          `json:"schema_version"`
-	Repo          string       `json:"repo"`
-	BaseSHA       string       `json:"base_sha"`
-	HeadSHA       string       `json:"head_sha"`
-	MRIID         int          `json:"mr_iid,omitempty"`
-	Nodes         NodeDelta    `json:"nodes"`
-	Edges         EdgeDelta    `json:"edges"`
-	Entrypoints   []Entrypoint `json:"entrypoints"`
-	Packages      PackageDelta `json:"packages"`
-	Suppressed    []Suppressed `json:"suppressed"`
-	Stats         Stats        `json:"stats"`
-	Warnings      []string     `json:"warnings"`
+	SchemaVersion int    `json:"schema_version"`
+	Repo          string `json:"repo"`
+	BaseSHA       string `json:"base_sha"`
+	HeadSHA       string `json:"head_sha"`
+	MRIID         int    `json:"mr_iid,omitempty"`
+	// Outcome and Reason are set by the CI job (section 14.1): "ok" when
+	// the delta below was computed, "failed" with the reason when it was
+	// not. A document written by the delta command alone has neither.
+	Outcome     string       `json:"outcome,omitempty"`
+	Reason      string       `json:"reason,omitempty"`
+	Nodes       NodeDelta    `json:"nodes"`
+	Edges       EdgeDelta    `json:"edges"`
+	Entrypoints []Entrypoint `json:"entrypoints"`
+	Packages    PackageDelta `json:"packages"`
+	Suppressed  []Suppressed `json:"suppressed"`
+	Stats       Stats        `json:"stats"`
+	Warnings    []string     `json:"warnings"`
 }
 
 // NodeDelta lists node changes by class. IDs in Added/Removed/BodyChanged

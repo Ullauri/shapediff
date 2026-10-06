@@ -36,6 +36,10 @@ func (b *builder) fn(pkg, name, sig string, tokens []string) *builder {
 	return b
 }
 
+// test and generated flag the last definition added.
+func (b *builder) test() *builder      { b.d.Nodes[len(b.d.Nodes)-1].Attrs.Test = true; return b }
+func (b *builder) generated() *builder { b.d.Nodes[len(b.d.Nodes)-1].Attrs.Generated = true; return b }
+
 func (b *builder) entry(kind, name, handler string) *builder {
 	b.d.Nodes = append(b.d.Nodes, graph.Node{ID: graph.EntryID(kind, name), Kind: graph.KindEntrypoint, Name: name, Attrs: graph.NodeAttrs{EntryKind: kind}})
 	b.d.Edges = append(b.d.Edges, graph.Edge{From: graph.EntryID(kind, name), To: handler, Kind: graph.EdgeHandles, Confidence: "resolved"})
@@ -209,4 +213,37 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// TestTestAndGeneratedOnlyChangesAreNotStructural: a new test, a new
+// generated method and a test's call into existing code are recorded in
+// the delta but do not make the change structural; a new program
+// function does.
+func TestTestAndGeneratedOnlyChangesAreNotStructural(t *testing.T) {
+	base := newDoc("b").pkg("a/p", "ok").fn("a/p", "A", "func A()", tokens(20, "a")).doc(t)
+	head := newDoc("h").pkg("a/p", "ok").fn("a/p", "A", "func A()", tokens(20, "a")).
+		fn("a/p", "TestA", "func TestA(t *testing.T)", tokens(20, "t")).test().
+		fn("a/p", "(*Queries).Count", "func (*Queries) Count()", tokens(20, "g")).generated().
+		call("sym:a/p.TestA", "sym:a/p.A", 0).
+		doc(t)
+	d := Compute(base, head, Options{})
+	if len(d.Nodes.Added) != 2 || len(d.Edges.Added) != 1 {
+		t.Fatalf("the changes should still be listed: %+v %+v", d.Nodes, d.Edges)
+	}
+	if d.Stats.Structural {
+		t.Errorf("test-only and generated-only changes read as structural: %+v", d.Stats)
+	}
+	head2 := newDoc("h2").pkg("a/p", "ok").fn("a/p", "A", "func A()", tokens(20, "a")).
+		fn("a/p", "TestA", "func TestA(t *testing.T)", tokens(20, "t")).test().
+		fn("a/p", "B", "func B()", tokens(20, "b")).doc(t)
+	if d := Compute(base, head2, Options{}); !d.Stats.Structural {
+		t.Errorf("a new program function is structural: %+v", d.Stats)
+	}
+	// Removing a test is not structural either; removing program code is.
+	if d := Compute(head, base, Options{}); d.Stats.Structural {
+		t.Errorf("removing a test and generated code read as structural: %+v", d.Stats)
+	}
+	if d := Compute(head2, base, Options{}); !d.Stats.Structural {
+		t.Errorf("removing a program function is structural: %+v", d.Stats)
+	}
 }

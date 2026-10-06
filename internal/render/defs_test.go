@@ -201,3 +201,40 @@ func TestBulletAfterRowIsNotSwallowed(t *testing.T) {
 		t.Errorf("a bullet after a row needs a blank line, or it is printed raw:\n%s", b.String())
 	}
 }
+
+// TestCallersLineMarksDynamicGuesses: a caller the call graph only reached
+// this method through an interface call with several possible targets is
+// "possibly" a caller, named apart from the callers the code names.
+func TestCallersLineMarksDynamicGuesses(t *testing.T) {
+	P, Q := "app/svc", "app/other"
+	fn := func(p, name string) graph.Node {
+		n := graph.Node{ID: graph.SymID(p, name), Kind: graph.KindSymbol, Name: name, Package: p}
+		n.Attrs.SymbolKind = "method"
+		return n
+	}
+	three, one := 3, 1
+	target := fn(P, "(*S).Error")
+	ix := graph.NewIndex(&graph.Document{Nodes: []graph.Node{target, fn(P, "Direct"), fn(Q, "Guess"), fn(P, "Unique"), fn(Q, "OtherGuess")}, Edges: []graph.Edge{
+		{From: graph.SymID(P, "Direct"), To: target.ID, Kind: graph.EdgeCalls},
+		{From: graph.SymID(Q, "Guess"), To: target.ID, Kind: graph.EdgeCalls, Attrs: graph.EdgeAttrs{Dynamic: true, Targets: &three}},
+		{From: graph.SymID(P, "Unique"), To: target.ID, Kind: graph.EdgeCalls, Attrs: graph.EdgeAttrs{Dynamic: true, Targets: &one}},
+		{From: graph.SymID(Q, "OtherGuess"), To: target.ID, Kind: graph.EdgeCalls, Attrs: graph.EdgeAttrs{Dynamic: true, Targets: &three}},
+	}})
+	got := callersLine(ix, ix.Node(target.ID), false, false, nil)
+	want := "Called by `Direct` and `Unique`, possibly by `Guess` in `other` and `OtherGuess` in `other`, through calls with several possible targets."
+	if got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+	only := graph.NewIndex(&graph.Document{Nodes: []graph.Node{target, fn(Q, "Guess")}, Edges: []graph.Edge{
+		{From: graph.SymID(Q, "Guess"), To: target.ID, Kind: graph.EdgeCalls, Attrs: graph.EdgeAttrs{Dynamic: true, Targets: &three}},
+	}})
+	got = callersLine(only, only.Node(target.ID), false, false, nil)
+	want = "Possibly called by `Guess` in `other`, through a call with several possible targets; no direct caller in the code."
+	if got != want {
+		t.Errorf("guess only: got  %q\nwant %q", got, want)
+	}
+	got = callersLine(only, only.Node(target.ID), true, false, nil)
+	if !strings.HasPrefix(got, "Was possibly called by") {
+		t.Errorf("removed: %q", got)
+	}
+}

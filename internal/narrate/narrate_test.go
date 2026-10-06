@@ -320,3 +320,48 @@ func TestLabelsAgreeAcrossSentences(t *testing.T) {
 		}
 	}
 }
+
+// TestKindListFoldsTestsAndGenerated: the headline counts program code,
+// and says how many definitions were tests or generated without naming
+// them.
+func TestKindListFoldsTestsAndGenerated(t *testing.T) {
+	mode := "m"
+	d := &graph.Document{SchemaVersion: 1, Repo: "r", SHA: "h", Extractor: graph.Extractor{Name: "x", Version: "1", Precision: "typed", Toolchain: "go", ConfigHash: "c", BuilderMode: &mode},
+		Packages: []graph.Package{{ID: "pkg:a/p", LoadStatus: "ok"}}}
+	sym := func(n, kind string, test, gen bool) graph.Node {
+		return graph.Node{ID: graph.SymID("a/p", n), Kind: graph.KindSymbol, Name: n, Package: "a/p", Attrs: graph.NodeAttrs{SymbolKind: kind, Test: test, Generated: gen},
+			Fingerprint: "f", BodyHash: "b", BodyTokens: 1, BodySketch: graph.MinHash([]string{n}), FingerprintRecv: map[bool]string{true: "r", false: ""}[kind == "method"]}
+	}
+	d.Nodes = []graph.Node{{ID: "pkg:a/p", Kind: graph.KindPackage, Name: "p", Package: "a/p"},
+		sym("Fresh", "func", false, false), sym("TestFresh", "func", true, false), sym("(*Queries).Count", "method", false, true), sym("(*Queries).Insert", "method", false, true)}
+	d.Canonicalize()
+	if p := graph.Validate(d); len(p) > 0 {
+		t.Fatal(p)
+	}
+	ix := graph.NewIndex(d)
+	all := []string{"sym:a/p.Fresh", "sym:a/p.TestFresh", "sym:a/p.(*Queries).Count", "sym:a/p.(*Queries).Insert"}
+	lead, items, ids := kindList(all, ix, "added", "", nil)
+	if lead != "**1 function added**, and 1 in tests and 2 generated" || len(items) != 1 || ids[0] != "sym:a/p.Fresh" {
+		t.Errorf("lead %q items %q ids %q", lead, items, ids)
+	}
+	lead, items, _ = kindList(all[2:], ix, "added", "", nil)
+	if lead != "**2 methods added in generated code**" || len(items) != 0 {
+		t.Errorf("generated only: lead %q items %q", lead, items)
+	}
+	lead, _, _ = kindList(all[1:], ix, "added", "", nil)
+	if lead != "**1 function added in tests, and 2 methods in generated code**" {
+		t.Errorf("tests and generated: lead %q", lead)
+	}
+}
+
+// TestUnchangedNamesWideReach: when the only reach that changed runs
+// through calls with many possible targets, the zero line says so rather
+// than "no endpoint's reach changed".
+func TestUnchangedNamesWideReach(t *testing.T) {
+	d := &delta.Delta{SchemaVersion: 1}
+	d.Stats = delta.Stats{EntrypointsAdded: 1, SignaturesChanged: 1, PackagesAdded: 1}
+	d.Entrypoints = []delta.Entrypoint{{ID: "entry:cli:main", Status: "unchanged", WideReachAdded: []string{"pkg:a/forge", "pkg:a/github"}}}
+	if got, want := Unchanged(d), "No endpoint's reach changed except through calls with many possible targets (1 endpoint, under Details)."; got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}

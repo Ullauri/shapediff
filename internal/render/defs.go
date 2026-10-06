@@ -165,9 +165,16 @@ func isAdded(d *delta.Delta, id string) bool {
 // new code. Existing code with no recorded caller is usually a framework
 // callback or reached through a value the extractor could not resolve,
 // and the line says so instead of calling it dead.
+//
+// A caller whose only call here is dynamic with several possible targets
+// (an interface method the call graph resolved to this method among
+// others) is a guess, and is named as one: "possibly by", apart from the
+// callers the code names. A guess printed as a fact is the worst thing
+// the note can say (spec section 3), and such a caller may live in a
+// package that cannot even import this one.
 func callersLine(ix *graph.Index, n *graph.Node, removed, added bool, labels map[string]string) string {
 	lead := entryLine(ix, n, removed)
-	var callers []*graph.Node
+	var callers, guesses []*graph.Node
 	tests := 0
 	for _, cid := range ix.CallerIDs(n.ID) {
 		c := ix.Node(cid)
@@ -178,47 +185,70 @@ func callersLine(ix *graph.Index, n *graph.Node, removed, added bool, labels map
 			tests++
 			continue
 		}
+		if guessedCall(ix, cid, n.ID) {
+			guesses = append(guesses, c)
+			continue
+		}
 		callers = append(callers, c)
 	}
 	var elsewhere []string
-	for _, c := range callers {
+	for _, c := range append(append([]*graph.Node{}, callers...), guesses...) {
 		if c.Package != n.Package {
 			elsewhere = append(elsewhere, c.Package)
 		}
 	}
 	pl := callerLabels(elsewhere, labels)
-	var names []string
-	for _, c := range callers {
-		s := "`" + mdEsc(c.Name) + "`"
-		if c.Package != n.Package {
-			s += " in `" + mdEsc(pl[c.Package]) + "`"
+	nameAll := func(cs []*graph.Node) ([]string, int) {
+		var names []string
+		for _, c := range cs {
+			s := "`" + mdEsc(c.Name) + "`"
+			if c.Package != n.Package {
+				s += " in `" + mdEsc(pl[c.Package]) + "`"
+			}
+			names = append(names, s)
 		}
-		names = append(names, s)
+		sort.Strings(names)
+		more := 0
+		if len(names) > maxCallers {
+			more = len(names) - maxCallers
+			names = names[:maxCallers]
+		}
+		return names, more
 	}
-	sort.Strings(names)
-	more := 0
-	if len(names) > maxCallers {
-		more = len(names) - maxCallers
-		names = names[:maxCallers]
-	}
+	names, more := nameAll(callers)
+	guessed, moreGuessed := nameAll(guesses)
 	verb := "Called by"
 	if removed {
 		verb = "Was called by"
 	}
+	through := "through " + plural(len(guesses), "a call", "calls") + " with several possible targets"
 	var calls string
 	switch {
-	case len(names) == 0 && tests == 0 && lead != "":
+	case len(names) == 0 && len(guessed) == 0 && tests == 0 && lead != "":
 		return lead
-	case len(names) == 0 && tests == 0 && removed:
+	case len(names) == 0 && len(guessed) == 0 && tests == 0 && removed:
 		calls = "Nothing called it."
-	case len(names) == 0 && tests == 0 && added:
+	case len(names) == 0 && len(guessed) == 0 && tests == 0 && added:
 		calls = "Nothing calls it yet."
-	case len(names) == 0 && tests == 0:
+	case len(names) == 0 && len(guessed) == 0 && tests == 0:
 		calls = "No caller in the code; a framework or a dynamic call may reach it."
-	case len(names) == 0:
+	case len(names) == 0 && len(guessed) == 0:
 		calls = fmt.Sprintf("%s its tests only (%d %s).", verb, tests, plural(tests, "test", "tests"))
+	case len(names) == 0:
+		possibly := "Possibly called by"
+		if removed {
+			possibly = "Was possibly called by"
+		}
+		calls = possibly + " " + andList(guessed, moreGuessed) + ", " + through + "; no direct caller in the code"
+		if tests > 0 {
+			calls += fmt.Sprintf(" apart from %d %s", tests, plural(tests, "test", "tests"))
+		}
+		calls += "."
 	default:
 		calls = verb + " " + andList(names, more)
+		if len(guessed) > 0 {
+			calls += ", possibly by " + andList(guessed, moreGuessed) + ", " + through
+		}
 		if tests > 0 {
 			calls += fmt.Sprintf(", plus %d %s", tests, plural(tests, "test", "tests"))
 		}
@@ -228,6 +258,14 @@ func callersLine(ix *graph.Index, n *graph.Node, removed, added bool, labels map
 		return lead + " " + calls
 	}
 	return calls
+}
+
+// guessedCall reports whether the call from one node to another is only a
+// dynamic one with several possible targets: resolved by the call graph,
+// not named by the code.
+func guessedCall(ix *graph.Index, from, to string) bool {
+	e := ix.EdgeSet[graph.EdgeKey{From: from, To: to, Kind: graph.EdgeCalls}]
+	return e != nil && e.Attrs.Dynamic && e.Attrs.Targets != nil && *e.Attrs.Targets > 1
 }
 
 // entryLine says which entry points run a function directly, each in the

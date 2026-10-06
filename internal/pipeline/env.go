@@ -30,8 +30,9 @@ type Env struct {
 	ProjectDir      string // CI_PROJECT_DIR
 	Token           string // SHAPEDIFF_TOKEN
 	CacheSpec       string // SHAPEDIFF_CACHE
-	// CommentAuthor is, on GitHub, the login whose comment is the note
-	// (SHAPEDIFF_COMMENT_AUTHOR); "" means the token's own. GitLab ignores it.
+	// CommentAuthor is the user whose comment or note is the job's
+	// (SHAPEDIFF_COMMENT_AUTHOR); "" means the token's own, read from the
+	// API. On both forges a note by anyone else is never taken for it.
 	CommentAuthor string
 }
 
@@ -61,6 +62,7 @@ func EnvFromFiles(get func(string) string, read func(string) ([]byte, error)) En
 		ProjectDir:      get("CI_PROJECT_DIR"),
 		Token:           get("SHAPEDIFF_TOKEN"),
 		CacheSpec:       get("SHAPEDIFF_CACHE"),
+		CommentAuthor:   get("SHAPEDIFF_COMMENT_AUTHOR"),
 	}
 	if e.ProjectDir == "" {
 		e.ProjectDir = "."

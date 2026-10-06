@@ -39,6 +39,12 @@ section.
 - **Structural when the head does not compile.** `stats.structural` is true
   whenever changes were hidden by suppression: a broken head cannot be
   called non-structural, and the headline says why.
+- **Structural over the program only.** A change whose every added,
+  removed, renamed or re-signed definition is a test or generated, and
+  whose every edge change starts in such code, is not structural: the
+  note never draws test or generated code, so there would be nothing to
+  show. The "What it did" list counts test and generated definitions
+  apart ("and 2 in tests and 7 generated") and names neither.
 - **Type signatures.** Interfaces carry their method set as the signature,
   so widening an interface is a signature change with callers; structs
   carry `struct`, so adding a field is not. Type parameters are positional
@@ -135,6 +141,16 @@ section.
   "and N more" under open-able rows is a plain line, not a bullet among
   disclosure triangles. Sentences about packages, imports and routes keep
   their bullets.
+- **A guess is named as a guess (section 3).** "Called by" lists the
+  callers the code names; a caller whose only call is dynamic with several
+  possible targets (an interface method the call graph resolved to this
+  method among others) is "possibly by", apart, since it may not even be
+  able to import the callee. The sentence under a call-path diagram says
+  whether an entry point reaches the changed code by asking the call
+  stacks, not by whether the diagram happened to draw the entry point; and
+  the zero line says "no endpoint's reach changed except through calls
+  with many possible targets" when that is the case, since on a program
+  whose `main` dispatches through a table that is the only reach there is.
 - **Counts name what they count.** `graph.DescribeKinds` turns counts per
   symbol kind into "3 functions and 1 type"; the note never says "symbols".
 - **Colliding package labels are widened (section 10).** Each package drawn
@@ -166,7 +182,10 @@ section.
   a reply quoting the note carries it too, and only in a comment by the
   token's own user (`github-actions[bot]` for `GITHUB_TOKEN`, which cannot
   read `/user`; `SHAPEDIFF_COMMENT_AUTHOR` overrides), since anyone who can
-  comment can type the marker. When no merge base is found the fallback is
+  comment can type the marker. The GitLab side applies the same two rules,
+  with the token's username from `/user`; when that cannot be read it says
+  so and falls back to the marker alone. Neither client retries a POST: a
+  lost response would otherwise post the note twice. When no merge base is found the fallback is
   a line on the job's log, not in the note.
 - **GitHub's comment limit** is 65,536 characters; GitLab's note limit is
   far above any note. A longer note loses its Details section first, with a
@@ -190,7 +209,10 @@ section.
   through the suite, and the twelve scenarios are named language-neutrally
   so a second language supplies its own `conformance/<lang>/`.
 - **Phase 4 (LLM rewrite)** has the claim validator and an
-  OpenAI-compatible client; with `narration: llm` and no endpoint the
+  OpenAI-compatible client. The endpoint, model and key come from
+  `SHAPEDIFF_LLM_ENDPOINT`, `SHAPEDIFF_LLM_MODEL` and `SHAPEDIFF_LLM_KEY`
+  in the CI environment, never from the repo config, which the change
+  under review controls; with `narration: llm` and no endpoint the
   template is used with a warning. Nothing makes a live call in tests.
 - **Graphviz** is used for the per-MR SVG fallback and the weekly pinned
   layout. When `dot`/`neato` are absent the `.dot` source is written and a

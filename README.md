@@ -167,17 +167,115 @@ so it must not be able to choose where a CI secret is sent.
 
 ## Commands
 
+One binary, seven commands. `shapediff help <command>` (or `<command> -h`)
+prints a command's flags, and `shapediff version` prints the version.
+Every command that writes a document takes `-o <file>` and writes to
+stdout without it. "Try it locally" above chains `extract`, `delta` and
+`render` by hand; `post` runs the same chain in CI.
+
+### extract
+
 ```
-shapediff extract  --repo . [--config .shapediff.yml] [--sha] [--repo-slug] [--extractor <exe>] -o graph.json
-shapediff delta    --base base.json --head head.json [--repo .] [--mr-iid N] -o delta.json
-shapediff render   --delta delta.json --head head.json --base base.json [--project-url URL] [--forge gitlab|github] [--diagram-only] -o note.md
-shapediff post     [--dry-run] [--extractor <exe>]   # the whole per-MR job from CI variables (spec 14.1), GitLab or GitHub
-shapediff weekly   --repos repos.yml | --repo <dir> [--dry-run] [--week YYYY-MM-DD|YYYY-Www]   # spec 14.2
-shapediff query    --graph base.json --symbols Create,(*Service).Get [--project-url URL] [--forge gitlab|github]  # spec 18, decision 5
-shapediff conform  --check graph.json | --fixtures conformance/go [--extractor "<exe>"] [--only a,b]
-shapediff version
-shapediff help     [command]              # a command's synopsis and flags; also `<command> -h`
+shapediff extract [--repo .] [--config .shapediff.yml] [--sha SHA] [--repo-slug owner/name] [--extractor <exe>] [-o graph.json]
 ```
+
+Builds the code graph of a checkout as it is on disk: packages, the
+definitions in them, entry points (routes, gRPC services, commands,
+workers, cron jobs), sinks (tables and outbound clients), and the import,
+call and registration edges between them, as one schema v1 JSON document
+(spec 6, 7). `--sha` and `--repo-slug` are only recorded in the document;
+they default to `git rev-parse HEAD` and the origin remote. It does not
+check anything out, so point `--repo` at the commit you mean. Without
+`--extractor` it runs the built-in Go extractor; with it, any executable
+under the plug-in contract, such as `extractors/python/shapediff-py` for a
+Python repo. Output that breaks the schema is rejected.
+
+### delta
+
+```
+shapediff delta --base base.json --head head.json [--repo .] [--config .shapediff.yml] [--mr-iid N] [-o delta.json]
+```
+
+Subtracts the base graph from the head graph (spec 8): definitions,
+edges, entry points and packages added and removed, signature changes
+with their callers, renames matched so that a moved definition is not a
+removal plus an addition, the change in what each entry point reaches,
+and suppression of packages that stopped compiling. `--repo` lets it ask
+git which files were renamed between the two commits, which widens rename
+matching. `--mr-iid` is recorded in the delta.
+
+### render
+
+```
+shapediff render --delta delta.json --base base.json --head head.json [--config .shapediff.yml] [--project-url URL] [--forge gitlab|github] [--weekly-url URL] [--mr-iid N] [--diagram-only] [-o note.md]
+```
+
+Turns a delta into the markdown of the note (spec 9 to 11): what the
+change touches and did, where it lands in the repo, a Mermaid diagram per
+changed flow with prose beside it, the call stacks, and a details table.
+Each diagram is filtered to the config's budget. `--project-url` turns
+names into permalinks, and `--forge` picks GitLab or GitHub link shapes
+and wording (it is inferred from the URL when omitted). `--diagram-only`
+prints only the Mermaid source of the primary call-path diagram, for
+pasting into a Mermaid editor.
+
+### post
+
+```
+shapediff post [--dry-run] [--extractor <exe>]
+```
+
+The whole per-change job of spec 14.1, inside a GitLab merge-request
+pipeline or a GitHub Actions pull-request run (see "Run it in CI" for the
+variables each reads). It gets both graphs from the cache or extracts
+them, computes the delta, renders the note, and posts it or updates the
+one it posted before. It writes `shapediff/delta.json` and
+`shapediff/note.md` every time, and it always exits 0, so it never blocks
+a merge. `--dry-run` does everything except post.
+
+### weekly
+
+```
+shapediff weekly [--repos repos.yml] [--week YYYY-MM-DD|YYYY-Www] [--dry-run] [-o page.md]
+shapediff weekly --repo <dir> [--branch B] [--extractor <exe>] [--week YYYY-MM-DD|YYYY-Www] [-o page.md]
+```
+
+The weekly structure brief of spec 14.2. For each repo in `repos.yml` it
+diffs the branch at the start and end of the week, attributes each change
+to the merged MR that made it through the cached per-MR deltas, lays out
+the package diagram, and publishes a `Structure/Week-YYYY-WW` wiki page
+with a roll-up across repos. `--week` defaults to last week. A repo that
+fails gets a "not reported" section instead of failing the page.
+`--dry-run` prints the page instead of publishing it. `--repo` briefs one
+local checkout with no repos file, no GitLab and no wiki (it implies
+`--dry-run`); `--branch` and `--extractor` apply only there.
+
+### query
+
+```
+shapediff query --graph base.json --symbols 'Create,(*Service).Get' [--config .shapediff.yml] [--project-url URL] [--forge gitlab|github] [-o answer.md]
+```
+
+Answers "what does this touch" against one graph, before there is a
+change to review (spec 18, decision 5). For each named symbol it lists
+its callers, what it reaches and the entry points above it, then draws
+one diagram through the same filter and renderer as the note. Symbols are
+full IDs or short names (the qualified name, or a method name alone when
+it is unique). Names it cannot resolve are reported, not fatal.
+
+### conform
+
+```
+shapediff conform --check graph.json
+shapediff conform --fixtures conformance/go [--extractor "<exe>"] [--only a,b] [--narrow-targets 2]
+```
+
+Checks an extractor against the contract (spec 6.3). `--check` validates
+one graph document against the schema invariants and prints each
+violation. `--fixtures` runs the scenarios in a fixture directory: it
+extracts each base and head pair, checks the invariants and the
+scenario's `expect.yml` assertions, and checks that two extractions are
+byte-identical. It exits non-zero on any failure.
 
 ## Development
 

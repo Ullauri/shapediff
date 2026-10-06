@@ -119,13 +119,25 @@ section.
   is a test), and more than eight code packages end in "also" and their
   names. Import-only changes and external modules are not listed. It is
   one list at the top, not a regrouping of the change list: "Where this
-  lands" is the per-package view. Its labels and the change list's come
+  lands" is the per-package view. Each code package with a "Where this
+  lands" row is a collapsed `<details>` row: the summary carries the label,
+  the root-relative path and the description as HTML (code spans become
+  `<code>`, emphasis is dropped, mentions are broken as in prose), and the
+  body is the directory link and `placeFacts` (importers, entry points,
+  sinks). `foldedTouches` tells `writeTouched` which packages not to repeat
+  those lines for. Without a baseline the row has nothing to open to and
+  stays a bullet. Its labels and the change list's come
   from one `delta.PackageLabels` over every package with a changed
   definition; labelled a sentence at a time, `services/reading` read as
   `reading` wherever `routers/reading` was not in the same sentence. A
   doc is the author's text, not markup: it is HTML-escaped outside code
   spans, and `@name`, `#123` and `!123` are broken with a zero-width space
   so a docstring mentioning `@dataclass` pings nobody on every post.
+- **Swag comments (section 6.1).** A Go doc comment with `@Summary` or
+  `@Description` lines has its `doc` built from those two tags alone
+  (`goextract.swagDoc`), and `render.swagMD` prints the parts on their own
+  lines under bold labels, escaping each part as its call site escapes
+  any doc.
 - **Every definition in "What it did" opens (14.1, like 10.3).** An item
   that names a definition ("`_meta_title` in `reading`") is a collapsed
   row, the same disclosure the call stacks use. Opened, it shows the

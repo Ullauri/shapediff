@@ -59,6 +59,47 @@ func TestResolveWeek(t *testing.T) {
 	}
 }
 
+// A commit made on a branch before the week and merged during it is not
+// where main stood when the week began: the week starts at main's own last
+// commit, so the merge counts in the week it landed in.
+func TestResolveWeekStaysOnTheBranch(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	repo := t.TempDir()
+	git := func(date string, args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE="+date)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("", "init", "-q", "-b", "main")
+	os.WriteFile(filepath.Join(repo, "f"), []byte("1"), 0o644)
+	git("2026-09-10T12:00:00Z", "add", "f")
+	git("2026-09-10T12:00:00Z", "commit", "-qm", "main before the week")
+	mainStart := git("", "rev-parse", "HEAD")
+	git("", "checkout", "-qb", "feature")
+	os.WriteFile(filepath.Join(repo, "g"), []byte("1"), 0o644)
+	git("2026-09-20T12:00:00Z", "add", "g")
+	git("2026-09-20T12:00:00Z", "commit", "-qm", "feature, the day before the week")
+	git("", "checkout", "-q", "main")
+	git("2026-09-22T12:00:00Z", "merge", "-q", "--no-ff", "-m", "merge feature during the week", "feature")
+	start, end := WeekWindow(time.Date(2026, 9, 24, 0, 0, 0, 0, time.UTC))
+	base, head, err := ResolveWeek(context.Background(), repo, "main", start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base != mainStart {
+		t.Errorf("week start = %s, want main's own last commit %s, not the feature branch's", base, mainStart)
+	}
+	if head != git("", "rev-parse", "HEAD") {
+		t.Errorf("week end = %s, want the merge", head)
+	}
+}
+
 func TestAttribute(t *testing.T) {
 	week := &delta.Delta{}
 	week.Nodes.Added = []string{"sym:a.X", "sym:a.Y"}

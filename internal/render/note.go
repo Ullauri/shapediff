@@ -233,8 +233,9 @@ func writeBaseline(b *strings.Builder, in NoteInput, key string) {
 		// to a word a line at note width, and a count ("3 added") did not
 		// say what was added.
 		b.WriteString("\n")
+		folded := foldedTouches(in)
 		for _, t := range bl.Touched {
-			writeTouched(b, in, t)
+			writeTouched(b, in, t, folded[t.ID])
 		}
 	}
 	if bl.Map == nil {
@@ -264,7 +265,9 @@ const maxNamed = 5
 // writeTouched is one package of "Where this lands": its name and size,
 // then one line per kind of change naming what changed, then who depends
 // on it and what it talks to. A line with nothing to say is left out.
-func writeTouched(b *strings.Builder, in NoteInput, t filter.TouchedPackage) {
+// folded says "What it touches" already opens to the package's place in
+// the repo, so those last lines would repeat it.
+func writeTouched(b *strings.Builder, in NoteInput, t filter.TouchedPackage, folded bool) {
 	name := "`" + mdEsc(t.Label) + "`"
 	if t.Dir != "" && in.ProjectURL != "" {
 		sha := in.BaseSHA
@@ -315,6 +318,18 @@ func writeTouched(b *strings.Builder, in NoteInput, t filter.TouchedPackage) {
 		}
 		fmt.Fprintf(b, "  - %s\n", line)
 	}
+	if folded {
+		return
+	}
+	for _, line := range placeFacts(in, t) {
+		fmt.Fprintf(b, "  - %s\n", line)
+	}
+}
+
+// placeFacts say where a package sits among the rest of the repo: who
+// imports it, which entry points reach it, which sinks it talks to.
+func placeFacts(in NoteInput, t filter.TouchedPackage) []string {
+	var out []string
 	for _, r := range []struct {
 		label string
 		ids   []string
@@ -324,11 +339,12 @@ func writeTouched(b *strings.Builder, in NoteInput, t filter.TouchedPackage) {
 			continue
 		}
 		var status map[string]string
-		if r.entry {
+		if r.entry && in.Baseline != nil {
 			status = in.Baseline.EntryStatus
 		}
-		fmt.Fprintf(b, "  - %s %s\n", r.label, shortList(r.ids, 4, status))
+		out = append(out, r.label+" "+shortList(r.ids, 4, status))
 	}
+	return out
 }
 
 // namedList names up to maxNamed definitions, "`Old` → `New`" for a

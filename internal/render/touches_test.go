@@ -183,3 +183,47 @@ func TestCapWords(t *testing.T) {
 		t.Errorf("capWords cut mid-word: %q", got)
 	}
 }
+
+// A package with a "Where this lands" row opens to its place in the repo,
+// and that section then leaves those lines out rather than repeat them. A
+// package without one stays a bullet.
+func TestTouchesRowsOpenToTheirPlace(t *testing.T) {
+	head, base, d := touchesFixture()
+	bl := &filter.Baseline{Touched: []filter.TouchedPackage{{
+		ID: "pkg:app/services/reading", Label: "app/services/reading", Status: filter.StatusTouched, Dir: "app/services/reading",
+		ImportedBy: []string{"app/routers/reading"}, Entrypoints: []string{}, Sinks: []string{"db reading_allowlist"},
+	}}}
+	in := NoteInput{Delta: d, Head: head, Base: base, Baseline: bl, ProjectURL: "https://github.com/acme/app", BaseSHA: "aaaaaaaaaaaa"}
+	var b strings.Builder
+	writeTouches(&b, in)
+	got := b.String()
+	row := "\n<details><summary><code>services/reading</code> app/services/reading · Reading service — recommendations and allowlist management.</summary>\n\n" +
+		"- In [`app/services/reading`](" + in.Forge.Tree(in.ProjectURL, "aaaaaaaaaaaa", "app/services/reading") + ")\n" +
+		"- Imported by `app/routers/reading`\n" +
+		"- Talks to `db reading_allowlist`\n" +
+		"\n</details>\n" +
+		// a bullet after a row needs the blank line
+		"\n- tests: `test_turns`\n"
+	if !strings.Contains(got, row) {
+		t.Errorf("want row:\n%s\nin:\n%s", row, got)
+	}
+	if !strings.Contains(got, "\n- **`routers/reading`**: _no doc recorded; inferred:_") {
+		t.Errorf("a package with no baseline row must stay a bullet:\n%s", got)
+	}
+	if f := foldedTouches(in); !f["pkg:app/services/reading"] || len(f) != 1 {
+		t.Errorf("folded = %v", f)
+	}
+	b.Reset()
+	writeTouched(&b, in, bl.Touched[0], true)
+	if strings.Contains(b.String(), "Imported by") || strings.Contains(b.String(), "Talks to") {
+		t.Errorf("a folded package's place is said once, at the top:\n%s", b.String())
+	}
+}
+
+func TestDocHTML(t *testing.T) {
+	got := docHTML("Wraps `a<b>` for **@ops** & #12.")
+	want := "Wraps <code>a&lt;b&gt;</code> for @​ops &amp; #​12."
+	if got != want {
+		t.Errorf("docHTML = %q, want %q", got, want)
+	}
+}

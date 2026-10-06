@@ -77,7 +77,7 @@ func dataflowBlurb(in NoteInput, dg *filter.Diagram, names map[string]string) st
 	var b strings.Builder
 	b.WriteString(lead.String())
 	if doc != nil {
-		fmt.Fprintf(&b, "\n\n> %s — `%s`", htmlEsc(doc.Doc), mdEsc(stackPkg(names, doc.Package)+"."+doc.Label))
+		fmt.Fprintf(&b, "\n\n> %s — `%s`", swagMD(doc.Doc, htmlEsc), mdEsc(stackPkg(names, doc.Package)+"."+doc.Label))
 	}
 	// The effect goes first: tables and other sinks lead each list, then
 	// the packages where the stack meets changed code, then context.
@@ -221,7 +221,7 @@ func reachItem(in NoteInput, n filter.Node, st *filter.Stack, lead *filter.Stack
 	}
 	item += ": " + capList(links)
 	if len(defs) == 1 && defs[0].Doc != "" && (lead == nil || defs[0].ID != lead.ID) {
-		item += " — " + htmlEsc(defs[0].Doc)
+		item += " — " + swagMD(defs[0].Doc, htmlEsc)
 	}
 	return item, rank
 }
@@ -613,7 +613,7 @@ func stackBody(in NoteInput, ln filter.StackLine) string {
 		fmt.Fprintf(&b, "```\n%s\n```\n\n", oneLine(ln.Signature))
 	}
 	if ln.Doc != "" {
-		b.WriteString(blockSafe(htmlEsc(ln.Doc)) + "\n\n")
+		b.WriteString(swagMD(ln.Doc, func(s string) string { return blockSafe(htmlEsc(s)) }) + "\n\n")
 	}
 	if ln.Hidden > 0 {
 		fmt.Fprintf(&b, "Makes %d more %s that %s to no changed code; not listed.\n\n", ln.Hidden, plural(ln.Hidden, "call", "calls"), plural(ln.Hidden, "leads", "lead"))
@@ -624,6 +624,32 @@ func stackBody(in NoteInput, ln filter.StackLine) string {
 		fmt.Fprintf(&b, "`%s:%d`\n", mdEsc(ln.File), ln.Line)
 	}
 	return b.String()
+}
+
+// swagMD is a doc attr as note text, each part escaped with esc. The Go
+// extractor writes a swag handler's annotations as "@Summary <text>
+// @Description <text>" (spec 6.1); each part goes on its own line under a
+// bold label, so the tags read as labels rather than as words of a
+// sentence. Any other doc is esc(doc).
+func swagMD(doc string, esc func(string) string) string {
+	if !strings.HasPrefix(doc, "@Summary ") && !strings.HasPrefix(doc, "@Description ") {
+		return esc(doc)
+	}
+	var parts []string
+	for _, tag := range []string{"@Summary ", "@Description "} {
+		i := strings.Index(doc, tag)
+		if i < 0 || (i > 0 && doc[i-1] != ' ') {
+			continue
+		}
+		text := doc[i+len(tag):]
+		if tag == "@Summary " {
+			if j := strings.Index(text, " @Description "); j >= 0 {
+				text = text[:j]
+			}
+		}
+		parts = append(parts, "**"+strings.TrimSpace(tag[1:])+":** "+esc(strings.TrimSpace(text)))
+	}
+	return strings.Join(parts, "<br>")
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }

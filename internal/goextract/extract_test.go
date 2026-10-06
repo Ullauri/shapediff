@@ -3,6 +3,7 @@ package goextract
 import (
 	"bytes"
 	"context"
+	"go/ast"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,5 +87,21 @@ func TestBaseFixtureValidatesAndIsDeterministic(t *testing.T) {
 	}
 	if doc := a; doc.Extractor.Toolchain == "unknown" {
 		t.Error("toolchain not resolved")
+	}
+}
+
+func TestSynopsisSwag(t *testing.T) {
+	for text, want := range map[string]string{
+		"CreateSubjectQuiz godoc\n@Summary Request a quiz for a subject\n@Description Enqueues an async quiz_generate job for the whole subject. Poll GET /jobs/{id}.\n@Router /subjects/{id}/quizzes [post]\n": "@Summary Request a quiz for a subject @Description Enqueues an async quiz_generate job for the whole subject.",
+		"Ping godoc\n@summary Health check\n@Router /ping [get]\n": "@Summary Health check",
+		"NewServer wires the cache. It also logs.\n":               "NewServer wires the cache.",
+	} {
+		cg := &ast.CommentGroup{}
+		for _, ln := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
+			cg.List = append(cg.List, &ast.Comment{Text: "// " + ln})
+		}
+		if got := synopsis(cg); got != want {
+			t.Errorf("synopsis(%q) = %q, want %q", text, got, want)
+		}
 	}
 }

@@ -376,3 +376,20 @@ func TestDotDisambiguatesPackages(t *testing.T) {
 		}
 	}
 }
+
+func TestSwagMD(t *testing.T) {
+	for in, want := range map[string]string{
+		"@Summary Request a quiz @Description Enqueues a <job>.": "**Summary:** Request a quiz<br>**Description:** Enqueues a &lt;job&gt;.",
+		"@Summary Health check":                                  "**Summary:** Health check",
+		"@Description Only a description.":                       "**Description:** Only a description.",
+		"NewServer wires the cache.":                             "NewServer wires the cache.",
+	} {
+		if got := swagMD(in, htmlEsc); got != want {
+			t.Errorf("swagMD(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// the definition rows break mentions; the labels are not mentions
+	if got := swagMD("@Summary Ping @ops", docEsc); got != "**Summary:** Ping @​ops" {
+		t.Errorf("swagMD with docEsc = %q", got)
+	}
+}

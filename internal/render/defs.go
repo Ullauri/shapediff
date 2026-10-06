@@ -94,7 +94,7 @@ func defBody(in NoteInput, id string, labels map[string]string) string {
 		fmt.Fprintf(&b, "```\n%s\n```\n\n", sig)
 	}
 	if n.Attrs.Doc != "" {
-		b.WriteString(blockSafe(docEsc(n.Attrs.Doc)) + "\n\n")
+		b.WriteString(swagMD(n.Attrs.Doc, func(s string) string { return blockSafe(docEsc(s)) }) + "\n\n")
 	}
 	if n.HasBody() {
 		b.WriteString(callersLine(ix, n, removed, isAdded(in.Delta, id), labels) + "\n\n")

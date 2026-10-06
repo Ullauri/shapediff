@@ -199,7 +199,13 @@ ID conventions (stable across SHAs by construction):
 
 `doc` is optional. It holds the first sentence of the definition's doc
 comment (Go) or docstring (Python), cut to 160 characters, and the call
-stacks of section 10.3 quote it. On a package node it is the package
+stacks of section 10.3 quote it. A Go comment in swaggo's annotation form
+(`Foo godoc`, then `@Summary`, `@Description`, `@Param`, `@Router`, one per
+line) is not prose and has no first sentence: its `doc` is `@Summary <text>
+@Description <text>`, the summary whole and the description's first
+sentence, either part left out when absent and each cut to 160 characters;
+every other tag and the `godoc` leader are dropped, and the note prints the
+two parts on their own lines under bold labels. On a package node it is the package
 comment (Go, from `doc.go` when there is one) or the module docstring
 (Python), and the note's "What it touches" list (section 14.1) opens with
 it. It is never part of a fingerprint or body
@@ -888,7 +894,9 @@ diagram (section 14.1), and has three parts, all read from the base graph
    radius), which entry points reach it narrowly (section 7.4) or are
    registered in it, and which sinks its symbols read or write, each cut
    at four names plus "+N". A line with nothing to say is left out. Each
-   package links to its directory tree at the base SHA.
+   package links to its directory tree at the base SHA. For a package
+   that "What it touches" folds (section 14.1), the importers, entry
+   points and sinks are said there and not repeated here.
 3. **The package map**: every internal package as a node, boxed by
    directory (the parent path relative to the packages' common root),
    import edges among them, one node per (package, entry kind) labelled
@@ -1317,7 +1325,12 @@ branch-only pipelines never fire that event. Steps:
 Note layout, top to bottom:
 
 - **What changed**: the suppression line from section 8.4 when there is
-  one; then the narration of section 11 in its list form, one item per
+  one; then "What it touches", one collapsed row per package the change
+  has code in, closed on its label, its path from the repo root and what
+  it is for (its `doc`, section 6.1, or a line inferred from the graph),
+  open on its directory, importers, entry points and sinks (section
+  10.1's facts, which then are not repeated there), with test packages
+  named on one line after the rows; then, under "What it did", the narration of section 11 in its list form, one item per
   fact class, each a bold count with what it counts named under it, one
   per line; then one line naming which of the four standing counts
   (endpoints added, endpoints' reach changed, signatures changed, packages
@@ -1852,3 +1865,22 @@ had not reached another. Fixes only; no new command, section or chrome.
   MR delta)" are "Definitions changed", "reach changed" and "unknown: no
   MR recorded it", and an empty reach cell is "—". The cross-repo roll-up
   stays a table, because it is read down a column to compare repos.
+
+### Added 2026-10-05 (the owner's review of the curriculumcompass note)
+
+- **"What it touches" is a row per package that opens** (sections 10.1
+  and 14.1). It was a list of names and their first sentences, and what
+  a reader needs next about `handlers` (where it is, what imports it,
+  which routes reach it, which tables it talks to) was a screen further
+  down under "Where this lands", repeated there for every package. Each
+  package is now a disclosure like the definitions in "What it did":
+  closed it reads as the list did, opened it gives those facts, and
+  "Where this lands" keeps the size and the change lines for that package
+  and drops the rest. A package with no "Where this lands" row (`baseline:
+  off`) stays a plain item.
+- **Swag annotations are read as labels** (section 6.1). A handler's
+  `CreateSubjectQuiz godoc @Summary Request a quiz for a subject
+  @Description Enqueues...` was one run-on "first sentence", with each tag
+  broken by the mention guard. The Go extractor keeps `@Summary` and
+  `@Description` and drops the rest; the note prints each on its own line
+  under a bold label.

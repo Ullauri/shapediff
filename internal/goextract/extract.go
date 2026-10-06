@@ -1449,16 +1449,54 @@ func unquote(s string) (string, error) { return strconv.Unquote(s) }
 const docCap = 160
 
 // synopsis is the doc attr: the first sentence of a doc comment, cut to
-// docCap runes.
+// docCap runes. A swag handler comment is annotations, not sentences, so
+// it is read by its tags instead (swagDoc).
 func synopsis(cg *ast.CommentGroup) string {
 	if cg == nil {
 		return ""
 	}
-	s := new(doc.Package).Synopsis(cg.Text())
+	text := cg.Text()
+	if s, ok := swagDoc(text); ok {
+		return s
+	}
+	return capDoc(new(doc.Package).Synopsis(text))
+}
+
+func capDoc(s string) string {
 	if r := []rune(s); len(r) > docCap {
 		s = strings.TrimSpace(string(r[:docCap-1])) + "…"
 	}
 	return s
+}
+
+// swagDoc reads a swaggo annotation comment ("Foo godoc", then "@Summary",
+// "@Description", "@Param", "@Router" and so on, one per line) as
+// "@Summary <text> @Description <text>": the summary whole, the
+// description's first sentence as for prose, each cut to docCap. The
+// leader and every other tag say nothing a reviewer reads for. It is
+// ok=false for a comment with neither tag, which is read as prose.
+func swagDoc(text string) (string, bool) {
+	var summary, desc []string
+	for _, ln := range strings.Split(text, "\n") {
+		f := strings.Fields(ln)
+		if len(f) == 0 {
+			continue
+		}
+		switch strings.ToLower(f[0]) {
+		case "@summary":
+			summary = append(summary, f[1:]...)
+		case "@description":
+			desc = append(desc, f[1:]...)
+		}
+	}
+	var parts []string
+	if len(summary) > 0 {
+		parts = append(parts, "@Summary "+capDoc(strings.Join(summary, " ")))
+	}
+	if len(desc) > 0 {
+		parts = append(parts, "@Description "+capDoc(new(doc.Package).Synopsis(strings.Join(desc, " "))))
+	}
+	return strings.Join(parts, " "), len(parts) > 0
 }
 
 // packageDoc is the package comment's synopsis (section 6.1): from doc.go

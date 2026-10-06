@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/Ullauri/shapediff/internal/delta"
+	"github.com/Ullauri/shapediff/internal/filter"
 	"github.com/Ullauri/shapediff/internal/graph"
 )
 
@@ -41,34 +42,140 @@ type touch struct {
 // graph, marked as inferred, because a guess must not read as the author's
 // words. New and removed packages carry the note's own 🟩 and 🟥. Import-
 // only changes do not count: nothing in the package changed.
+//
+// Each package is a row that opens, as a definition in "What it did" does:
+// closed it reads as the list did, a name and what the package is for;
+// opened it says where the package sits, in its directory, under its
+// importers, behind its entry points and in front of its data stores. Those
+// lines are "Where this lands" facts (section 10.1), so that section leaves
+// them out for a package folded here rather than say them twice. A package
+// with no "Where this lands" row (baseline: off) stays a plain bullet.
 func writeTouches(b *strings.Builder, in NoteInput) {
-	ts := touches(in)
-	if len(ts) == 0 {
+	code, tests := touchGroups(in)
+	if len(code)+len(tests) == 0 {
 		return
 	}
-	// Test packages describe themselves by name, and a change with new
-	// tests has many of them; described one by one they crowd out the code
-	// they test. They are named on one line after the rest.
-	var code, tests []touch
-	for _, t := range ts {
+	b.WriteString("\n**What it touches**\n")
+	// A bullet straight after a row is read as part of its HTML block and
+	// printed raw, and a list item straight before one swallows it; each
+	// switch between the two takes a blank line.
+	afterRow := true
+	for i, t := range code {
+		if i == maxTouches {
+			if afterRow {
+				b.WriteString("\n")
+			}
+			fmt.Fprintf(b, "- also %s\n", named(labelsOf(code[i:]), 4, ""))
+			afterRow = false
+			break
+		}
+		if row, ok := touchedRow(in, t.path); ok {
+			if body := touchBody(in, row); body != "" {
+				fmt.Fprintf(b, "\n<details><summary>%s</summary>\n\n%s\n</details>\n", t.summaryHTML(row.Label), body)
+				afterRow = true
+				continue
+			}
+		}
+		if afterRow {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(b, "- %s**`%s`**: %s\n", t.mark(), mdEsc(t.label), t.describe())
+		afterRow = false
+	}
+	if len(tests) > 0 {
+		if afterRow {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(b, "- tests: %s\n", named(labelsOf(tests), 3, ""))
+	}
+	b.WriteString("\n**What it did**\n")
+}
+
+// touchGroups splits the touched packages into code and tests. Test
+// packages describe themselves by name, and a change with new tests has
+// many of them; described one by one they crowd out the code they test,
+// so they are named on one line after the rest.
+func touchGroups(in NoteInput) (code, tests []touch) {
+	for _, t := range touches(in) {
 		if t.test {
 			tests = append(tests, t)
 		} else {
 			code = append(code, t)
 		}
 	}
-	b.WriteString("\n**What it touches**\n\n")
+	return code, tests
+}
+
+// foldedTouches are the packages "What it touches" printed as rows, by
+// pkg: ID: the ones whose place in the repo "Where this lands" leaves out.
+func foldedTouches(in NoteInput) map[string]bool {
+	code, _ := touchGroups(in)
+	out := map[string]bool{}
 	for i, t := range code {
 		if i == maxTouches {
-			fmt.Fprintf(b, "- also %s\n", named(labelsOf(code[i:]), 4, ""))
 			break
 		}
-		fmt.Fprintf(b, "- %s**`%s`**: %s\n", t.mark(), mdEsc(t.label), t.describe())
+		if row, ok := touchedRow(in, t.path); ok && touchBody(in, row) != "" {
+			out[row.ID] = true
+		}
 	}
-	if len(tests) > 0 {
-		fmt.Fprintf(b, "- tests: %s\n", named(labelsOf(tests), 3, ""))
+	return out
+}
+
+// touchedRow is the package's "Where this lands" row, which knows its
+// directory, importers, entry points and sinks.
+func touchedRow(in NoteInput, path string) (filter.TouchedPackage, bool) {
+	if in.Baseline == nil {
+		return filter.TouchedPackage{}, false
 	}
-	b.WriteString("\n**What it did**\n")
+	id := graph.PkgID(path)
+	for _, t := range in.Baseline.Touched {
+		if t.ID == id {
+			return t, true
+		}
+	}
+	return filter.TouchedPackage{}, false
+}
+
+// touchBody is what a package's row opens to: its directory, then where it
+// sits among the rest of the repo. "" when there is nothing to say.
+func touchBody(in NoteInput, t filter.TouchedPackage) string {
+	var lines []string
+	if t.Dir != "" {
+		dir := "`" + mdEsc(t.Dir) + "`"
+		if in.ProjectURL != "" {
+			sha := in.BaseSHA
+			if t.Status == filter.StatusAdded {
+				sha = in.HeadSHA
+			}
+			dir = fmt.Sprintf("[%s](%s)", dir, in.Forge.Tree(in.ProjectURL, sha, t.Dir))
+		}
+		lines = append(lines, "In "+dir)
+	}
+	lines = append(lines, placeFacts(in, t)...)
+	if len(lines) == 0 {
+		return ""
+	}
+	return "- " + strings.Join(lines, "\n- ") + "\n"
+}
+
+// summaryHTML is a row's closed line: the label the change list uses, the
+// package's path from the repo's root when that says more, then what the
+// package is for. A <summary> shows HTML, not markdown.
+func (t touch) summaryHTML(path string) string {
+	s := t.mark() + "<code>" + htmlEsc(t.label) + "</code>"
+	if path != "" && path != t.label {
+		s += " " + htmlEsc(path)
+	}
+	switch {
+	case t.doc != "":
+		s += " · " + docHTML(capWords(t.doc, docCap))
+	case t.infer != "":
+		s += " · <em>no doc recorded; inferred:</em> " + mdToHTML(t.infer)
+	default:
+		s += " · <em>no doc recorded.</em>"
+	}
+	return s
 }
 
 func labelsOf(ts []touch) []string {
@@ -436,4 +543,23 @@ func docEsc(s string) string {
 		}
 	}
 	return strings.Join(parts, "`")
+}
+
+// docHTML is docEsc for a <summary>, where markdown is not rendered: a
+// code span becomes <code>, emphasis markers are dropped, and the prose is
+// escaped with its mentions broken as docEsc breaks them.
+func docHTML(s string) string {
+	parts := strings.Split(s, "`")
+	if len(parts)%2 == 0 {
+		parts = []string{s}
+	}
+	var b strings.Builder
+	for i, p := range parts {
+		if i%2 == 1 {
+			b.WriteString("<code>" + htmlEsc(p) + "</code>")
+			continue
+		}
+		b.WriteString(mention.ReplaceAllString(htmlEsc(strings.ReplaceAll(p, "**", "")), "$1​$2"))
+	}
+	return b.String()
 }

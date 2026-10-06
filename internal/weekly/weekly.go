@@ -25,8 +25,14 @@ type MergedMR struct {
 }
 
 // ResolveWeek returns the SHAs of branch at start and end, via
-// `git rev-list -1 --before=<t> <branch>`. "main@week_start" is not
-// re-derivable later, so callers print both on the page.
+// `git rev-list -1 --first-parent --before=<t> <branch>`. "main@week_start"
+// is not re-derivable later, so callers print both on the page.
+//
+// --first-parent keeps the walk on the branch itself. Without it git
+// returns the newest commit by date among all ancestors, and a commit made
+// on a feature branch before the week but merged during it qualifies: the
+// week then started inside that branch, and the change it merged was left
+// out of the week it landed in.
 func ResolveWeek(ctx context.Context, repoDir, branch string, start, end time.Time) (baseSHA, headSHA string, err error) {
 	baseSHA, err = revBefore(ctx, repoDir, branch, start)
 	if err != nil {
@@ -40,7 +46,7 @@ func ResolveWeek(ctx context.Context, repoDir, branch string, start, end time.Ti
 }
 
 func revBefore(ctx context.Context, repoDir, branch string, t time.Time) (string, error) {
-	out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "rev-list", "-1", "--before="+t.UTC().Format(time.RFC3339), branch).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "rev-list", "-1", "--first-parent", "--before="+t.UTC().Format(time.RFC3339), branch).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("git rev-list: %v: %s", err, strings.TrimSpace(string(out)))
 	}

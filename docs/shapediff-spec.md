@@ -636,7 +636,10 @@ compose (an edge added in MR 1 and removed in MR 3 cancels; merge order
 matters). Instead:
 
 - Resolve `main` at the week's start and end to SHAs **and print them in
-  the page**; "main@week_start" is not re-derivable later.
+  the page**; "main@week_start" is not re-derivable later. Resolve along
+  `main`'s first parents: the newest ancestor by date can be a commit made
+  on a branch before the week and merged during it, which starts the week
+  inside that branch and drops the merge from the week it landed in.
 - Diff those two SHAs directly with the same engine.
 - **Attribute** each changed node to MRs by joining on the **cached per-MR
   deltas** (section 14.1 caches the delta document per MR alongside the
@@ -1884,3 +1887,10 @@ had not reached another. Fixes only; no new command, section or chrome.
   broken by the mention guard. The Go extractor keeps `@Summary` and
   `@Description` and drops the rest; the note prints each on its own line
   under a bold label.
+- **The week starts where `main` stood** (section 8.3). `weekly` resolved
+  the week's ends with `git rev-list -1 --before=<t>`, which returns the
+  newest ancestor by date from any merged branch. Run on curriculumcompass
+  for the week of 2026-08-10, it started the week at the tip of PR #4's
+  branch, so PR #4's five new endpoints were missing from the week it
+  merged in; devlogplus showed the same for the week of 2026-08-17. The
+  walk is now `--first-parent`.

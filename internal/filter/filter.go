@@ -23,9 +23,10 @@ const sigCallerCap = 8  // callers of a signature change exempt from collapse (s
 const terminalFloor = 8 // below this B the terminal rule falls back to SVG (step 4f)
 const terminalStep = 4  // how much B drops per terminal iteration
 
-// hiddenMoreID is the terminal rule's remainder marker. It is edgeless by
+// HiddenMoreID is the terminal rule's remainder marker, exported so the
+// renderer can caption it instead of drawing a box with no arrows. It is edgeless by
 // construction, so the orphan prune must keep it.
-const hiddenMoreID = "more:hidden"
+const HiddenMoreID = "more:hidden"
 
 // Apply runs section 9 over the delta. head and base are the two graphs.
 func Apply(d *delta.Delta, head, base *graph.Index, opts Options) *Result {
@@ -395,7 +396,7 @@ func (w *work) pruneOrphans() ([]Node, int) {
 	var out []Node
 	dropped := 0
 	for _, id := range w.sortedIDs() {
-		if deg[id] > 0 || id == hiddenMoreID || w.pinned[id] {
+		if deg[id] > 0 || id == HiddenMoreID || w.pinned[id] {
 			continue
 		}
 		n := w.nodes[id]

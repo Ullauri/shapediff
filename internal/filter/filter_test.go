@@ -233,7 +233,7 @@ func TestBudgetStepD(t *testing.T) {
 	d.Canonicalize()
 	dg := Apply(d, head, head, Options{Budget: Budget{Chars: 0, Nodes: 2, Edges: 10, NarrowTargets: 2}}).CallPaths[0]
 	n := dg.NodeByID("more:" + p + ":added")
-	if n == nil || n.CollapsedCount != 5 || n.Label != "p +5 more" || n.Status != StatusAdded {
+	if n == nil || n.CollapsedCount != 5 || n.Label != "5 new in p" || n.Status != StatusAdded {
 		t.Fatalf("step d: %v %+v", nodeIDs(&dg), n)
 	}
 	if len(dg.Nodes) != 2 { // the caller and the group
@@ -670,7 +670,7 @@ func TestWiringBudgetKeepsAddedPackage(t *testing.T) {
 		t.Errorf("the added package was budgeted away: %v", nodeIDs(res.Wiring))
 	}
 	for _, n := range res.Wiring.Nodes {
-		if n.ID == hiddenMoreID {
+		if n.ID == HiddenMoreID {
 			continue
 		}
 		var deg int

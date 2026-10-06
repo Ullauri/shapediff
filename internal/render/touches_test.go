@@ -76,8 +76,7 @@ func TestTouches(t *testing.T) {
 		// the package's own words, markdown and all, escaped only for HTML
 		"- **`services/reading`**: Reading service — recommendations and **allowlist** management.\n" +
 		// the most changed package, but test code: one line, last
-		"- tests: `test_turns`\n" +
-		"\n**What it did**\n"
+		"- tests: `test_turns`\n"
 	if got != want {
 		t.Errorf("got:\n%s\nwant:\n%s", got, want)
 	}

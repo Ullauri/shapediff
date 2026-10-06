@@ -331,8 +331,8 @@ func CallPathBlurb(in NoteInput, dg *filter.Diagram) string {
 			sinks = append(sinks, reachName(n, nil))
 		case filter.KindMore:
 			// The clause already names the package, and inside its package
-			// box the node is drawn as a bare "+N more" (writeNode).
-			box := fmt.Sprintf("+%d more", n.CollapsedCount)
+			// box the node is drawn without it (writeNode).
+			box := filter.MoreLabel(n.CollapsedCount, n.Status, "")
 			for _, m := range n.Members {
 				c := find(bucket(m.Status), m.Package, box)
 				c.items = append(c.items, codeLink(in, m))
@@ -449,7 +449,7 @@ func writeStacks(b *strings.Builder, in NoteInput) {
 	if len(stacks) == 0 {
 		return
 	}
-	b.WriteString("\n#### Call stacks\n\n")
+	b.WriteString("\n### Call stacks\n\n")
 	b.WriteString("What runs when each entry point this " + in.Forge.Change() + " touches is called: its handler, every call on the way to changed code, " +
 		"and the other calls made along the way, as context. `+` is added, `-` removed, `~` a changed signature; an unmarked line is unchanged. " +
 		"Open a line for its signature, what it does and where it is.\n")
@@ -510,9 +510,10 @@ func writeStack(b *strings.Builder, in NoteInput, st filter.Stack) {
 				tree.WriteString("├─ ")
 			}
 		}
-		code := stackMarker(ln) + " " + tree.String() + stackText(ln)
-		code = strings.ReplaceAll(htmlEsc(code), " ", "&nbsp;")
-		fmt.Fprintf(b, "<details><summary><code>%s</code>%s</summary>\n\n%s\n</details>\n", code, stackNote(ln), stackBody(in, ln))
+		// The mark and the tree sit outside the code span: inside it they
+		// rendered as a grey bar of varying width before every name.
+		lead := strings.ReplaceAll(htmlEsc(stackMarker(ln)+" "+tree.String()), " ", "&nbsp;")
+		fmt.Fprintf(b, "<details><summary>%s<code>%s</code>%s</summary>\n\n%s\n</details>\n", lead, htmlEsc(stackText(ln)), stackNote(ln), stackBody(in, ln))
 	}
 	if st.Truncated {
 		fmt.Fprintf(b, "\nCut at %d lines.\n", len(st.Lines))

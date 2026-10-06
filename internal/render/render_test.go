@@ -89,7 +89,7 @@ func TestShortNameCollision(t *testing.T) {
 		Edges: []filter.Edge{{From: "pkg:acme/svc/api/pipelines", To: "pkg:acme/svc/app/pipelines", Kind: "imports", Status: filter.EdgeAdded}},
 	}
 	src := Mermaid(dg)
-	for _, want := range []string{`[["api/pipelines"]]`, `[["app/pipelines"]]`, `[["orders"]]`} {
+	for _, want := range []string{`api/pipelines"]]`, `app/pipelines"]]`, `orders"]]`} {
 		if !strings.Contains(src, want) {
 			t.Errorf("missing %q in:\n%s", want, src)
 		}
@@ -175,14 +175,14 @@ func TestNoteGolden(t *testing.T) {
 	if !strings.HasPrefix(got, Marker+"\n") {
 		t.Error("marker must be the first line")
 	}
-	order := []string{"#### What changed\n", "**Head does not compile:**",
+	order := []string{"### What changed\n", "**Head does not compile:**",
 		"- **1 endpoint's reach changed**\n  - `POST /orders` now also reaches `orders` (db sink)\n- **1 signature changed**, 3 callers in all\n  - `(*Service).Create` in `orders`, 3 callers\n",
-		"\nNo endpoint was added.\n", "#### Where this lands",
+		"\nNo endpoint was added.\n", "### Where this lands",
 		"At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external module not drawn). This MR changes code in 1 of them and adds 1 new package.",
-		"- **[`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders)**: 7 functions, 3 methods and 2 types\n  - 1 added: `Validate`\n  - 1 changed signature: `(*Service).Create`\n  - Imported by `api`, `billing`, `cron`, `export`, +1\n  - Reached from `POST /orders` (new)\n  - Talks to `db orders`\n",
+		"- **[`orders`](https://gitlab.example.com/acme/svc/-/tree/aaaaaaaaaaaa/orders)**: 7 functions, 3 methods and 2 types\n  - 1 added\n  - 1 changed signature\n  - Imported by `api`, `billing`, `cron`, `export`, +1\n  - Reached from `POST /orders` (new)\n  - Talks to `orders` table\n",
 		"- **[`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util)**: new package, 3 functions\n  - Imported by `orders`\n",
-		Key(true, true), "classDef touched", `(["2 http routes"])`, "```\n4 untouched packages folded into their directory to fit.\n", "#### Dataflow", "**POST /orders**", "Existing endpoint whose reach changed, handled by [`Handler.Create`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/api/h.go#L3) in `svc/api`.", "> Creates an order. — `svc/orders.(*Service).Create`", "🟩 **Now also reaches**\n\n- the `orders` table: writes it in [`(*Service).Create`]", "#### Call paths", "What `POST /orders` calls, down to the changed code:\n\n- 🟩 **new** in `orders`: [`Validate`]", "- ⬜ the `orders` table", "<details><summary>1 more call-path diagram", "**GET /x**", "- 🟩 **new** in `a`: `B`",
-		"#### Call stacks", "**`POST /orders`**, reach changed", "<code>&nbsp;&nbsp;Handler.Create</code> svc/api", "<code>~&nbsp;├─&nbsp;(*Service).Create</code> svc/orders · signature changed", "```diff\n- func (*Service) Create()\n+ func (*Service) Create(ctx context.Context)\n```", "Creates an order.", "<code>+&nbsp;│&nbsp;&nbsp;└─&nbsp;writes&nbsp;db&nbsp;orders</code> new write", "<code>&nbsp;&nbsp;└─&nbsp;+2&nbsp;more</code>", "Also calls `log.Info` and `metrics.Inc`.", "#### Module wiring", "<details><summary>Details", "| node | status |", "| [`Validate`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7) | 🟩 added | acme/svc/orders |", "| [`Old`](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1) | 🟥 removed | acme/svc/util |", "**Renames**", "`Old` → `Older` (probably: similar body)", "**Body-only changes**", "**Wide-reach changes**", "**Suppressed packages**", "2 nodes hidden by the budget", "**Warnings**", "vta took 41s", "extractor go-xtools 0.1.0 (typed, go1.26.0), base aaaaaaaa, head bbbbbbbb, 1.234s"}
+		Key(true, true), "classDef touched", `(["2 http routes"])`, "```\n4 untouched packages folded into their directory to fit.\n", "### Dataflow", "**POST /orders**", "Existing endpoint whose reach changed, handled by [`Handler.Create`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/api/h.go#L3) in `svc/api`.", "> Creates an order. — `svc/orders.(*Service).Create`", "🟩 **Now also reaches**\n\n- the `orders` table: writes it in [`(*Service).Create`]", "### Call paths", "What `POST /orders` calls, down to the changed code:\n\n- 🟩 **new** in `orders`: [`Validate`]", "- ⬜ the `orders` table", "<details><summary>1 more call-path diagram", "**GET /x**", "- 🟩 **new** in `a`: `B`",
+		"### Call stacks", "**`POST /orders`**, reach changed", "&nbsp;&nbsp;<code>Handler.Create</code> svc/api", "~&nbsp;├─&nbsp;<code>(*Service).Create</code> svc/orders · signature changed", "```diff\n- func (*Service) Create()\n+ func (*Service) Create(ctx context.Context)\n```", "Creates an order.", "+&nbsp;│&nbsp;&nbsp;└─&nbsp;<code>writes db orders</code> new write", "&nbsp;&nbsp;└─&nbsp;<code>+2 more</code>", "Also calls `log.Info` and `metrics.Inc`.", "### Module wiring", "<details><summary>Details", "| definition | status |", "| [`Validate`](https://gitlab.example.com/acme/svc/-/blob/bbbbbbbbbbbb/orders/v.go#L7) | 🟩 added | orders |", "| [`Old`](https://gitlab.example.com/acme/svc/-/blob/aaaaaaaaaaaa/util/o.go#L1) | 🟥 removed | util |", "**Renames**", "`Old` → `Older` (probably: similar body)", "**Body-only changes**", "**Wide-reach changes**", "**Suppressed packages**", "2 hidden by the budget", "**Warnings**", "vta took 41s", "extractor go-xtools 0.1.0 (typed, go1.26.0), base aaaaaaaa, head bbbbbbbb, 1.234s"}
 	pos := 0
 	for _, o := range order {
 		i := strings.Index(got[pos:], o)
@@ -204,7 +204,7 @@ func TestNoteGolden(t *testing.T) {
 	if string(want) != got {
 		t.Errorf("note differs from golden; run with UPDATE_GOLDEN=1 to refresh\n%s", got)
 	}
-	if n := strings.Count(got, "**Key**\n"); n != 1 {
+	if n := strings.Count(got, "**Key** "); n != 1 {
 		t.Errorf("want one key in the note, got %d", n)
 	}
 	// Without the package map the key moves down to the first delta diagram
@@ -212,7 +212,7 @@ func TestNoteGolden(t *testing.T) {
 	noMap := in
 	noMap.Baseline = nil
 	got, _ = Note(noMap)
-	if i, j := strings.Index(got, Key(false, true)), strings.Index(got, "#### Dataflow"); i < 0 || j < i {
+	if i, j := strings.Index(got, Key(false, true)), strings.Index(got, "### Dataflow"); i < 0 || j < i {
 		t.Errorf("without a map the delta key should sit above the dataflow diagram:\n%s", got)
 	}
 	// fallback path
@@ -229,7 +229,7 @@ func TestNoteGolden(t *testing.T) {
 	}
 	// The collapsed section says what it holds, so a reviewer can tell
 	// whether a warning or a doubtful rename is behind it.
-	if !strings.Contains(got, "<details><summary>Details: 7 nodes, 1 rename, 1 body-only change, 1 wide-reach change, 1 suppressed package, 1 warning</summary>") {
+	if !strings.Contains(got, "<details><summary>Details: 7 drawn items, 1 rename, 1 body-only change, 1 wide-reach change, 1 suppressed package, 1 warning</summary>") {
 		t.Error("details summary should count what it holds")
 	}
 	if NoStructuralNote("bbbbbbbbbbbb") != Marker+"\nno structural change at bbbbbbbb\n" {
@@ -260,15 +260,15 @@ func TestNoteGolden(t *testing.T) {
 // package map, amber, `*` and the call arrows to the delta diagrams. It is a
 // list, one line per concern, not a paragraph.
 func TestKey(t *testing.T) {
-	if k := Key(true, true); !strings.HasPrefix(k, "**Key**\n\n- ") || strings.Count(k, "\n- ") != 5 {
-		t.Errorf("key should be a five-line list:\n%s", k)
+	if k := Key(true, true); !strings.HasPrefix(k, "**Key** 🟩 `+` added") || !strings.Contains(k, "<details><summary>Shapes and arrows</summary>") || strings.Count(k, "\n- ") != 4 {
+		t.Errorf("key should be one colour line and a folded four-line list:\n%s", k)
 	}
 	for _, c := range []struct {
 		pkgMap, delta bool
 		has, lacks    []string
 	}{
-		{true, true, []string{"🟪 package this MR changes", "🟨 signature changed", "an arrow is an import", "dynamic dispatch", "`name*`", "**cylinder** data store"}, nil},
-		{false, true, []string{"🟨 signature changed", "dynamic dispatch", "`name*`"}, []string{"🟪", "import", "directory"}},
+		{true, true, []string{"🟪 package this MR changes", "🟨 `~` signature changed", "an arrow is an import", "dynamic dispatch", "`name*`", "**cylinder** data store"}, nil},
+		{false, true, []string{"🟨 `~` signature changed", "dynamic dispatch", "`name*`"}, []string{"🟪", "import", "directory"}},
 		{true, false, []string{"🟪 package this MR changes", "an arrow is an import", "directory"}, []string{"🟨", "dispatch", "`name*`", "plain box"}},
 	} {
 		k := Key(c.pkgMap, c.delta)
@@ -351,7 +351,7 @@ func TestGroupLabelCollision(t *testing.T) {
 		Edges: []filter.Edge{{From: "more:acme/svc/api/pipelines:added", To: "more:acme/svc/app/pipelines:added", Kind: "calls", Status: filter.EdgeAdded}},
 	}
 	src := Mermaid(dg)
-	for _, want := range []string{`"api/pipelines +2 more"`, `"app/pipelines +3 more"`} {
+	for _, want := range []string{`"2 new in api/pipelines"`, `"3 new in app/pipelines"`} {
 		if !strings.Contains(src, want) {
 			t.Errorf("missing %s in:\n%s", want, src)
 		}
@@ -370,7 +370,7 @@ func TestDotDisambiguatesPackages(t *testing.T) {
 		Edges: []filter.Edge{{From: "pkg:acme/svc/api/pipelines", To: "pkg:acme/svc/app/pipelines", Kind: "imports", Status: filter.EdgeAdded}},
 	}
 	src := Dot(dg)
-	for _, want := range []string{`label="api/pipelines"`, `label="app/pipelines"`} {
+	for _, want := range []string{`api/pipelines"`, `app/pipelines"`} {
 		if !strings.Contains(src, want) {
 			t.Errorf("missing %s in:\n%s", want, src)
 		}

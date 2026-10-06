@@ -586,10 +586,7 @@ func (m *mapBuilder) initial() *work {
 		for _, k := range kinds {
 			sid := sinkKindID(k)
 			if w.nodes[sid] == nil {
-				label := k + " " + m.sinkNames[k]
-				if n := m.sinkKinds[k]; n > 1 {
-					label = fmt.Sprintf("%s (%d)", k, n)
-				}
+				label := SinkLabel(k, m.sinkNames[k], m.sinkKinds[k])
 				w.nodes[sid] = &Node{ID: sid, Kind: KindSink, Label: label, Status: StatusContext, priority: prioContext, CollapsedCount: m.sinkKinds[k]}
 				w.context[sid] = true
 			}
@@ -832,4 +829,26 @@ func (w *work) sortedEdgeKeys() []edgeKey {
 		return a.Kind < b.Kind
 	})
 	return keys
+}
+
+// SinkLabel names a sink box on the package map in a reviewer's words:
+// "orders table", "http (HTTP client)", or "3 tables" when several of one
+// kind fold into one box. "http_client http" was the schema speaking.
+func SinkLabel(kind, name string, n int) string {
+	one, many := strings.ReplaceAll(kind, "_", " "), strings.ReplaceAll(kind, "_", " ")+"s"
+	switch kind {
+	case "db":
+		one, many = "table", "tables"
+	case "http_client":
+		one, many = "HTTP client", "HTTP clients"
+	case "fs":
+		one, many = "file store", "file stores"
+	}
+	if n > 1 {
+		return fmt.Sprintf("%d %s", n, many)
+	}
+	if kind == "db" {
+		return name + " table"
+	}
+	return name + " (" + one + ")"
 }

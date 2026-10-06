@@ -15,11 +15,11 @@ import (
 // rest are only named.
 const maxTouches = 8
 
-// docCap is how long a description may run. A package's first sentence is
-// kept to 160 characters by the extractors (section 6.1); a line in a
-// glossary read before the change list wants less, so a longer one is cut
-// at a word.
-const docCap = 120
+// docCap is how long a description may run: the first sentence the
+// extractors keep (section 6.1, 160 characters). A longer one is cut at
+// the last clause boundary before the cap, so the line ends at a thought
+// rather than mid-word.
+const docCap = 160
 
 // touch is one package the change has code in, and what it is for.
 type touch struct {
@@ -88,7 +88,6 @@ func writeTouches(b *strings.Builder, in NoteInput) {
 		}
 		fmt.Fprintf(b, "- tests: %s\n", named(labelsOf(tests), 3, ""))
 	}
-	b.WriteString("\n**What it did**\n")
 }
 
 // touchGroups splits the touched packages into code and tests. Test
@@ -516,9 +515,21 @@ func capWords(s string, n int) string {
 		return s
 	}
 	cut := string(r[:n-1])
-	if i := strings.LastIndex(cut, " "); i > len(cut)/2 {
-		cut = cut[:i]
+	// A clause boundary first, so the line ends at a thought; a word
+	// boundary when there is none in the second half.
+	best := -1
+	for _, sep := range []string{". ", "; ", ": ", ", ", " — ", " (", " - "} {
+		if i := strings.LastIndex(cut, sep); i > len(cut)/2 && i > best {
+			best = i
+		}
 	}
+	if best < 0 {
+		best = strings.LastIndex(cut, " ")
+		if best <= len(cut)/2 {
+			best = len(cut)
+		}
+	}
+	cut = cut[:best]
 	return strings.TrimRight(cut, " ,;:—-(") + "…"
 }
 

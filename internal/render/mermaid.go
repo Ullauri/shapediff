@@ -31,9 +31,9 @@ func Key(pkgMap, delta bool) string { return keyFor(pkgMap, delta, "MR") }
 
 // keyFor is Key with the change named the way the forge names it.
 func keyFor(pkgMap, delta bool, change string) string {
-	colours := []string{"🟩 added", "🟥 removed (dashed)"}
+	colours := []string{"🟩 `+` added", "🟥 `-` removed (dashed)"}
 	if delta {
-		colours = append(colours, "🟨 signature changed")
+		colours = append(colours, "🟨 `~` signature changed")
 	}
 	if pkgMap {
 		colours = append(colours, "🟪 package this "+change+" changes")
@@ -43,7 +43,7 @@ func keyFor(pkgMap, delta bool, change string) string {
 	if delta {
 		shapes += " · **plain box** function or type"
 	}
-	lines := []string{strings.Join(colours, " · "), shapes}
+	lines := []string{shapes}
 	if delta {
 		lines = append(lines, "Arrows take their colour the same way: `──▶` call · `┈┈▶` inferred call · `╌╌▶` dynamic dispatch")
 	}
@@ -54,9 +54,11 @@ func keyFor(pkgMap, delta bool, change string) string {
 		lines = append(lines, "In the package map an arrow is an import, coloured the same way, and an outer box a directory")
 	}
 	if delta {
-		lines = append(lines, "`name*` body also changed · `+N more` N definitions drawn as one box")
+		lines = append(lines, "`name*` body also changed · `8 new in pkg` eight definitions drawn as one box")
 	}
-	return "**Key**\n\n- " + strings.Join(lines, "\n- ")
+	// The colours stay in view, one line; the shapes and arrows, which a
+	// reader needs once, fold under it.
+	return "**Key** " + strings.Join(colours, " · ") + "\n\n<details><summary>Shapes and arrows</summary>\n\n- " + strings.Join(lines, "\n- ") + "\n\n</details>"
 }
 
 // classDefs is the styling preamble, one line per class, emitted only for
@@ -75,6 +77,11 @@ var classDefs = map[string]string{
 	"more":                        "fill:#f3f4f6,stroke:#9ca3af,stroke-dasharray:2 2,color:#1f2937",
 }
 
+// boxDef styles the grouping boxes (a package in the call paths, a
+// directory in the map) neutral: Mermaid's default subgraph fill is a
+// yellow a reader took for the amber of a signature change.
+const boxDef = "fill:#fafafa,stroke:#cbd5e1,color:#475569"
+
 // Mermaid renders one diagram as flowchart LR source (without fences).
 func Mermaid(dg *filter.Diagram) string {
 	return mermaidNamed(dg, shortNames(dg))
@@ -87,6 +94,9 @@ func mermaidNamed(dg *filter.Diagram, names map[string]string) string {
 	b.WriteString("flowchart LR\n")
 	classes := map[string][]string{}
 	for _, n := range dg.Nodes {
+		if n.ID == filter.HiddenMoreID {
+			continue // captioned under the diagram, not drawn as a box with no arrows
+		}
 		cls := n.Status
 		if n.Kind == filter.KindMore && n.Status == filter.StatusContext {
 			cls = "more"
@@ -113,6 +123,9 @@ func mermaidNamed(dg *filter.Diagram, names map[string]string) string {
 		sub[s] = true
 	}
 	for _, n := range dg.Nodes {
+		if n.ID == filter.HiddenMoreID {
+			continue
+		}
 		switch {
 		case n.Group != "":
 			byBox[n.Group] = append(byBox[n.Group], n)
@@ -129,6 +142,10 @@ func mermaidNamed(dg *filter.Diagram, names map[string]string) string {
 		boxes = append(boxes, p)
 	}
 	sort.Strings(boxes)
+	if len(boxes) > 0 {
+		fmt.Fprintf(&b, "  classDef box %s\n", boxDef)
+	}
+	var boxIDs []string
 	for _, p := range boxes {
 		fmt.Fprintf(&b, "  subgraph %s[\"%s\"]\n", sgID(p), esc(boxLabel[p]))
 		for _, n := range byBox[p] {
@@ -138,6 +155,10 @@ func mermaidNamed(dg *filter.Diagram, names map[string]string) string {
 			writeNode(&b, n, names, n.Group == "")
 		}
 		b.WriteString("  end\n")
+		boxIDs = append(boxIDs, sgID(p))
+	}
+	if len(boxIDs) > 0 {
+		fmt.Fprintf(&b, "  class %s box\n", strings.Join(boxIDs, ","))
 	}
 	for _, n := range bare {
 		writeNode(&b, n, names, false)
@@ -187,11 +208,11 @@ func mermaidNamed(dg *filter.Diagram, names map[string]string) string {
 }
 
 func writeNode(b *strings.Builder, n filter.Node, names map[string]string, inSubgraph bool) {
-	label := esc(labelIn(n, names))
+	label := esc(statusMark(n) + labelIn(n, names))
 	if inSubgraph && n.Kind == filter.KindMore && n.CollapsedCount > 0 {
 		// The box already sits inside its package's subgraph; repeating the
 		// name inside it is noise.
-		label = esc(fmt.Sprintf("+%d more", n.CollapsedCount))
+		label = esc(filter.MoreLabel(n.CollapsedCount, n.Status, ""))
 	}
 	switch n.Kind {
 	case filter.KindEntrypoint:
@@ -219,7 +240,7 @@ func labelIn(n filter.Node, names map[string]string) string {
 		// Recomposed rather than trusting the label the filter baked: that
 		// one is the bare last path segment and cannot know what it collides
 		// with in this diagram.
-		l = fmt.Sprintf("%s +%d more", pickName(names, n.Package), n.CollapsedCount)
+		l = filter.MoreLabel(n.CollapsedCount, n.Status, pickName(names, n.Package))
 	}
 	if n.Kind == filter.KindPackage {
 		// The baseline map presets the label (the import path relative to

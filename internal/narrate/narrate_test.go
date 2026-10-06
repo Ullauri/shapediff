@@ -60,7 +60,7 @@ func TestUnchanged(t *testing.T) {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}
 	d.Stats = delta.Stats{SignaturesChanged: 1}
-	if got, want := Unchanged(d), "No endpoint was added, no endpoint's reach changed and no package was added."; got != want {
+	if got, want := Unchanged(d), "No entry point was added, no entry point's reach changed and no package was added."; got != want {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}
 	d.Stats = delta.Stats{EntrypointsAdded: 1, EntrypointsReachChanged: 1, SignaturesChanged: 1, PackagesAdded: 1}
@@ -100,12 +100,12 @@ func TestTemplateListForm(t *testing.T) {
 		}
 	}
 	want := []string{
-		"**1 endpoint added**",
-		"  `POST /orders`, which reaches `orders` (db sink)",
-		"**1 endpoint removed**",
+		"**1 entry point added**",
+		"  `POST /orders`, which reaches the `orders` table",
+		"**1 entry point removed**",
 		"  `Old/Do`",
-		"**1 endpoint's reach changed**",
-		"  `GET /orders` now also reaches `cache`; no longer reaches `audit` (queue sink)",
+		"**1 entry point's reach changed**",
+		"  `GET /orders` now also reaches `cache`; no longer reaches `audit` (queue)",
 		"**1 signature changed**, 2 callers in all",
 		"  `Target` in `p`, 2 callers",
 		"**1 definition renamed**",
@@ -159,7 +159,7 @@ func TestTemplateOrderAndClaims(t *testing.T) {
 	want := []string{
 		"`POST /orders` is added.",
 		"`Old/Do` is removed.",
-		"`GET /orders` now reaches `cache`; `GET /orders` no longer reaches `audit` (queue sink); `POST /orders` now reaches `orders` (db sink).",
+		"`GET /orders` now reaches `cache`; `GET /orders` no longer reaches `audit` (queue); `POST /orders` now reaches the `orders` table.",
 		"`Target` changed signature (2 callers).",
 		"`Old` renamed to `New` (probably).",
 		"`Fresh` is added.",
@@ -361,7 +361,7 @@ func TestUnchangedNamesWideReach(t *testing.T) {
 	d := &delta.Delta{SchemaVersion: 1}
 	d.Stats = delta.Stats{EntrypointsAdded: 1, SignaturesChanged: 1, PackagesAdded: 1}
 	d.Entrypoints = []delta.Entrypoint{{ID: "entry:cli:main", Status: "unchanged", WideReachAdded: []string{"pkg:a/forge", "pkg:a/github"}}}
-	if got, want := Unchanged(d), "No endpoint's reach changed except through calls with many possible targets (1 endpoint, under Details)."; got != want {
+	if got, want := Unchanged(d), "No entry point's reach changed except through calls with many possible targets (1 entry point, under Details)."; got != want {
 		t.Errorf("got  %q\nwant %q", got, want)
 	}
 }

@@ -89,7 +89,7 @@ func TestShortNameCollision(t *testing.T) {
 		Edges: []filter.Edge{{From: "pkg:acme/svc/api/pipelines", To: "pkg:acme/svc/app/pipelines", Kind: "imports", Status: filter.EdgeAdded}},
 	}
 	src := Mermaid(dg)
-	for _, want := range []string{`[["api/pipelines"]]`, `[["app/pipelines"]]`, `[["orders"]]`} {
+	for _, want := range []string{`api/pipelines"]]`, `app/pipelines"]]`, `orders"]]`} {
 		if !strings.Contains(src, want) {
 			t.Errorf("missing %q in:\n%s", want, src)
 		}
@@ -260,15 +260,15 @@ func TestNoteGolden(t *testing.T) {
 // package map, amber, `*` and the call arrows to the delta diagrams. It is a
 // list, one line per concern, not a paragraph.
 func TestKey(t *testing.T) {
-	if k := Key(true, true); !strings.HasPrefix(k, "**Key** 🟩 added") || !strings.Contains(k, "<details><summary>Shapes and arrows</summary>") || strings.Count(k, "\n- ") != 4 {
+	if k := Key(true, true); !strings.HasPrefix(k, "**Key** 🟩 `+` added") || !strings.Contains(k, "<details><summary>Shapes and arrows</summary>") || strings.Count(k, "\n- ") != 4 {
 		t.Errorf("key should be one colour line and a folded four-line list:\n%s", k)
 	}
 	for _, c := range []struct {
 		pkgMap, delta bool
 		has, lacks    []string
 	}{
-		{true, true, []string{"🟪 package this MR changes", "🟨 signature changed", "an arrow is an import", "dynamic dispatch", "`name*`", "**cylinder** data store"}, nil},
-		{false, true, []string{"🟨 signature changed", "dynamic dispatch", "`name*`"}, []string{"🟪", "import", "directory"}},
+		{true, true, []string{"🟪 package this MR changes", "🟨 `~` signature changed", "an arrow is an import", "dynamic dispatch", "`name*`", "**cylinder** data store"}, nil},
+		{false, true, []string{"🟨 `~` signature changed", "dynamic dispatch", "`name*`"}, []string{"🟪", "import", "directory"}},
 		{true, false, []string{"🟪 package this MR changes", "an arrow is an import", "directory"}, []string{"🟨", "dispatch", "`name*`", "plain box"}},
 	} {
 		k := Key(c.pkgMap, c.delta)
@@ -370,7 +370,7 @@ func TestDotDisambiguatesPackages(t *testing.T) {
 		Edges: []filter.Edge{{From: "pkg:acme/svc/api/pipelines", To: "pkg:acme/svc/app/pipelines", Kind: "imports", Status: filter.EdgeAdded}},
 	}
 	src := Dot(dg)
-	for _, want := range []string{`label="api/pipelines"`, `label="app/pipelines"`} {
+	for _, want := range []string{`api/pipelines"`, `app/pipelines"`} {
 		if !strings.Contains(src, want) {
 			t.Errorf("missing %s in:\n%s", want, src)
 		}

@@ -157,7 +157,16 @@ section.
   arrows. Section headings are `###`, so they outrank the bold counts
   under them. Sinks are named in words everywhere ("`orders` table",
   "`http` (HTTP client)"), packages by the note's one label, and the
-  Details footer prints only the counts that are not zero.
+  Details footer prints only the counts that are not zero. Under the title
+  one sentence ("In short: this PR changes code in `render` and
+  `goextract`; adds 10 and edits 8 definitions; changes 1 signature (2
+  callers); no entry point reaches the changed code") is read off the
+  delta, the stats and the call stacks, so it is what a reviewer gets when
+  they read nothing else and it cannot disagree with the sections below.
+  Drawn labels carry the stacks' `+`, `-` and `~` as well as their colour,
+  so status is not colour alone. At most six dataflow diagrams are drawn,
+  the ones with the most reach edges first; the entry points past them
+  keep their sentence and lose their picture, behind one line.
 - **Every definition in "What it did" opens (14.1, like 10.3).** An item
   that names a definition ("`_meta_title` in `reading`") is a collapsed
   row, the same disclosure the call stacks use. Opened, it shows the

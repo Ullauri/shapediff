@@ -25,7 +25,7 @@ At base aaaaaaaa the repo has 3 packages, 2 entry points and 1 sink (1 external 
 - **[`util`](https://gitlab.example.com/acme/svc/-/tree/bbbbbbbbbbbb/util)**: new package, 3 functions
   - Imported by `orders`
 
-**Key** 🟩 added · 🟥 removed (dashed) · 🟨 signature changed · 🟪 package this MR changes · ⬜ unchanged, drawn for context
+**Key** 🟩 `+` added · 🟥 `-` removed (dashed) · 🟨 `~` signature changed · 🟪 package this MR changes · ⬜ unchanged, drawn for context
 
 <details><summary>Shapes and arrows</summary>
 
@@ -44,7 +44,7 @@ flowchart LR
   n30b7924f(["2 http routes"])
   n7309427a[["orders"]]
   n9cc466a4[["store"]]
-  na7fef5cf[["util"]]
+  na7fef5cf[["+ util"]]
   n53798808[("db")]
   n30b7924f --> n7309427a
   n7309427a --> n9cc466a4
@@ -89,15 +89,15 @@ flowchart LR
   classDef signature_changed fill:#fef3c7,stroke:#d97706,color:#1f2937
   classDef box fill:#fafafa,stroke:#cbd5e1,color:#475569
   subgraph sg2f27a5c6["orders"]
-    na3c6eddb["(*Service).Create* (+3 callers)"]
+    na3c6eddb["~ (*Service).Create* (+3 callers)"]
     n7e4a7fe1["Handler"]
-    n3fa7fd89["Validate"]
+    n3fa7fd89["+ Validate"]
   end
   class sg2f27a5c6 box
   ndcb5c3a1(["POST /orders"])
   na7fef5cf[["util +3 more"]]
   nc5b8bb09[("orders")]
-  n6e4081b5["Old"]
+  n6e4081b5["- Old"]
   ndcb5c3a1 --> n7e4a7fe1
   na3c6eddb -.->|3 targets| na7fef5cf
   na3c6eddb --> nc5b8bb09
@@ -130,7 +130,7 @@ flowchart LR
   classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
   classDef box fill:#fafafa,stroke:#cbd5e1,color:#475569
   subgraph sge40c292c["a"]
-    na90b54ed["B"]
+    na90b54ed["+ B"]
   end
   class sge40c292c box
   class na90b54ed added
@@ -183,7 +183,7 @@ flowchart LR
   classDef added fill:#dcfce7,stroke:#16a34a,color:#1f2937
   classDef context fill:#f3f4f6,stroke:#9ca3af,color:#1f2937
   n7309427a[["orders"]]
-  na7fef5cf[["util"]]
+  na7fef5cf[["+ util"]]
   n7309427a --> na7fef5cf
   linkStyle 0 stroke:#16a34a,stroke-width:2px
   class na7fef5cf added

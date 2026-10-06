@@ -88,7 +88,7 @@ func dotNode(b *strings.Builder, n filter.Node, names map[string]string) {
 	case filter.StatusQuery:
 		fill, stroke = "#dbeafe", "#2563eb"
 	}
-	fmt.Fprintf(b, "  %q [label=%q, shape=%s, fillcolor=\"%s\", color=\"%s\"];\n", nID(n.ID), labelIn(n, names), shape, fill, stroke)
+	fmt.Fprintf(b, "  %q [label=%q, shape=%s, fillcolor=\"%s\", color=\"%s\"];\n", nID(n.ID), statusMark(n)+labelIn(n, names), shape, fill, stroke)
 }
 
 // SVG renders the diagram with graphviz dot. It returns an error when dot

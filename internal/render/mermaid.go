@@ -31,9 +31,9 @@ func Key(pkgMap, delta bool) string { return keyFor(pkgMap, delta, "MR") }
 
 // keyFor is Key with the change named the way the forge names it.
 func keyFor(pkgMap, delta bool, change string) string {
-	colours := []string{"🟩 added", "🟥 removed (dashed)"}
+	colours := []string{"🟩 `+` added", "🟥 `-` removed (dashed)"}
 	if delta {
-		colours = append(colours, "🟨 signature changed")
+		colours = append(colours, "🟨 `~` signature changed")
 	}
 	if pkgMap {
 		colours = append(colours, "🟪 package this "+change+" changes")
@@ -208,7 +208,7 @@ func mermaidNamed(dg *filter.Diagram, names map[string]string) string {
 }
 
 func writeNode(b *strings.Builder, n filter.Node, names map[string]string, inSubgraph bool) {
-	label := esc(labelIn(n, names))
+	label := esc(statusMark(n) + labelIn(n, names))
 	if inSubgraph && n.Kind == filter.KindMore && n.CollapsedCount > 0 {
 		// The box already sits inside its package's subgraph; repeating the
 		// name inside it is noise.

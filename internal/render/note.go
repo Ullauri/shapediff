@@ -75,6 +75,9 @@ func Note(in NoteInput) (string, error) {
 	// One line says what this is and what it compares, so a reader who
 	// meets the comment cold is not left to infer it from a heading.
 	fmt.Fprintf(&b, "**shapediff** · what this %s did to the shape of the code · base `%s` → head `%s`\n\n", in.Forge.Change(), short(in.BaseSHA), short(in.HeadSHA))
+	if lead := leadLine(in); lead != "" {
+		b.WriteString(lead + "\n\n")
+	}
 	writeSummary(&b, in)
 	// One key, above the first diagram. Under the call paths it was invisible
 	// to a reader of the dataflow diagram, and repeating it per diagram turns
@@ -104,13 +107,27 @@ func Note(in NoteInput) (string, error) {
 		}
 		names := shortNamesOf(all...)
 		b.WriteString("\n### Dataflow\n")
-		for i := range dfs {
-			dg := dfs[i]
+		drawn, rest := splitDataflows(dfs)
+		for _, dg := range drawn {
 			fmt.Fprintf(&b, "\n**%s**\n\n", mdEsc(dg.Title))
-			if s := dataflowBlurb(in, &dg, names); s != "" {
+			if s := dataflowBlurb(in, dg, names); s != "" {
 				b.WriteString(s + "\n\n")
 			}
-			fence(&b, mermaidNamed(&dg, names))
+			fence(&b, mermaidNamed(dg, names))
+		}
+		if len(rest) > 0 {
+			// A change that registers thirty routes would otherwise be
+			// thirty diagrams before the call paths, past what a forge
+			// renders on one page. The facts of each stay, as text; the
+			// picture goes.
+			fmt.Fprintf(&b, "\n<details><summary>%d more entry %s, without diagrams</summary>\n", len(rest), plural(len(rest), "point", "points"))
+			for _, dg := range rest {
+				fmt.Fprintf(&b, "\n**%s**\n\n", mdEsc(dg.Title))
+				if s := dataflowBlurb(in, dg, names); s != "" {
+					b.WriteString(s + "\n")
+				}
+			}
+			b.WriteString("\n</details>\n")
 		}
 	}
 	if len(in.Filter.CallPaths) > 0 && len(in.Filter.CallPaths[0].Nodes) > 0 {
@@ -754,4 +771,30 @@ func isRemoved(d *delta.Delta, id string) bool {
 		}
 	}
 	return false
+}
+
+// maxDataflows is how many dataflow diagrams the note draws; the entry
+// points past it keep their sentence and lose their picture. GitLab
+// renders fifty Mermaid blocks on a page and GitHub bounds a comment, and
+// a change that registers many routes must not spend all of that here.
+const maxDataflows = 6
+
+// splitDataflows picks the diagrams to draw: the ones with the most reach
+// edges first, since they are the ones with something to show, ties by
+// title, so the choice is stable across pushes.
+func splitDataflows(dfs []filter.Diagram) (drawn, rest []*filter.Diagram) {
+	all := make([]*filter.Diagram, len(dfs))
+	for i := range dfs {
+		all[i] = &dfs[i]
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		if len(all[i].Edges) != len(all[j].Edges) {
+			return len(all[i].Edges) > len(all[j].Edges)
+		}
+		return all[i].Title < all[j].Title
+	})
+	if len(all) <= maxDataflows {
+		return all, nil
+	}
+	return all[:maxDataflows], all[maxDataflows:]
 }

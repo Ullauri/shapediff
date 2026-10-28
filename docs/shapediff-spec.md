@@ -1798,9 +1798,9 @@ details table and sent back the rest as a wall of text:
   them; a value merely built from rows, such as a response model, is not
   one.
 
-Third pass, 2026-09-26, the owner's review of the notes for homechan,
-devlogplus !27 and curriculumcompass !4. Everything that had to be read
-across went down the page:
+Third pass, 2026-09-26, the owner's review of the notes for devlogplus !27
+and for a change in each of two private repos, one Python and one Go.
+Everything that had to be read across went down the page:
 
 - **The headline and narration are one list** (sections 11 and 14.1). The
   headline was a line of four counts and the narration a paragraph naming
@@ -1869,7 +1869,7 @@ had not reached another. Fixes only; no new command, section or chrome.
   MR recorded it", and an empty reach cell is "—". The cross-repo roll-up
   stays a table, because it is read down a column to compare repos.
 
-### Added 2026-10-05 (the owner's review of the curriculumcompass note)
+### Added 2026-10-05 (the owner's review of a note on a private Go repo)
 
 - **"What it touches" is a row per package that opens** (sections 10.1
   and 14.1). It was a list of names and their first sentences, and what
@@ -1882,15 +1882,15 @@ had not reached another. Fixes only; no new command, section or chrome.
   and drops the rest. A package with no "Where this lands" row (`baseline:
   off`) stays a plain item.
 - **Swag annotations are read as labels** (section 6.1). A handler's
-  `CreateSubjectQuiz godoc @Summary Request a quiz for a subject
+  `CreateOrder godoc @Summary Place an order
   @Description Enqueues...` was one run-on "first sentence", with each tag
   broken by the mention guard. The Go extractor keeps `@Summary` and
   `@Description` and drops the rest; the note prints each on its own line
   under a bold label.
 - **The week starts where `main` stood** (section 8.3). `weekly` resolved
   the week's ends with `git rev-list -1 --before=<t>`, which returns the
-  newest ancestor by date from any merged branch. Run on curriculumcompass
-  for the week of 2026-08-10, it started the week at the tip of PR #4's
-  branch, so PR #4's five new endpoints were missing from the week it
+  newest ancestor by date from any merged branch. Run on the private Go repo
+  for the week of 2026-08-10, it started the week at the tip of a PR's
+  branch, so that PR's five new endpoints were missing from the week it
   merged in; devlogplus showed the same for the week of 2026-08-17. The
   walk is now `--first-parent`.

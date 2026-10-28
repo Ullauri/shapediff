@@ -92,7 +92,7 @@ func TestBaseFixtureValidatesAndIsDeterministic(t *testing.T) {
 
 func TestSynopsisSwag(t *testing.T) {
 	for text, want := range map[string]string{
-		"CreateSubjectQuiz godoc\n@Summary Request a quiz for a subject\n@Description Enqueues an async quiz_generate job for the whole subject. Poll GET /jobs/{id}.\n@Router /subjects/{id}/quizzes [post]\n": "@Summary Request a quiz for a subject @Description Enqueues an async quiz_generate job for the whole subject.",
+		"CreateOrder godoc\n@Summary Place an order for a customer\n@Description Enqueues an async order_fulfil job for the whole order. Poll GET /jobs/{id}.\n@Router /customers/{id}/orders [post]\n": "@Summary Place an order for a customer @Description Enqueues an async order_fulfil job for the whole order.",
 		"Ping godoc\n@summary Health check\n@Router /ping [get]\n": "@Summary Health check",
 		"NewServer wires the cache. It also logs.\n":               "NewServer wires the cache.",
 	} {

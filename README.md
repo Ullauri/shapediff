@@ -70,7 +70,7 @@ so a new language only needs to provide its own `conformance/<lang>/`.
 Requires Go 1.26 or later and `git`.
 
 ```
-go install github.com/Ullauri/shapediff/cmd/shapediff@v0.2.0
+go install github.com/Ullauri/shapediff/cmd/shapediff@v0.3.0
 ```
 
 Or from a clone:
